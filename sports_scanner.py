@@ -108,7 +108,7 @@ def get_odds(api_key: str, sport_key: str) -> list:
     params = {
         "apiKey":     api_key,
         "regions":    "eu",
-        "markets":    "h2h",
+        "markets":    "h2h,totals",
         "oddsFormat": "decimal",
         "dateFormat": "iso",
     }
