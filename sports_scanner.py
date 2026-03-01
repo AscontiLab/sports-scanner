@@ -343,6 +343,17 @@ def predict_football(home: str, away: str, model: dict, max_goals: int = 8):
     }
 
 
+def predict_ou(lam_home: float, lam_away: float, line: float) -> tuple[float, float]:
+    """
+    Berechnet P(Über line) und P(Unter line) via Poisson.
+    Beispiel: line=2.5 → P(Unter 2.5) = P(total ≤ 2)
+    """
+    lam_total = lam_home + lam_away
+    p_under = float(poisson.cdf(int(line), lam_total))
+    p_over  = 1.0 - p_under
+    return p_over, p_under
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # FOOTBALL: TEAM-NAMEN-MATCHING
 # ═══════════════════════════════════════════════════════════════════════════════
