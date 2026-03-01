@@ -227,6 +227,54 @@ def bookie_consensus(match: dict) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# CLUB-ELO
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def download_clubelo(date: str) -> dict:
+    """
+    Lädt Club-Elo-Ratings für ein Datum (Format: YYYY-MM-DD).
+    Gibt {club_name: elo_rating} zurück.
+    """
+    url = CLUBELO_URL.format(date=date)
+    try:
+        r = requests.get(url, timeout=20)
+        r.raise_for_status()
+        df = pd.read_csv(StringIO(r.text))
+        result = {}
+        for _, row in df.iterrows():
+            club = row.get("Club")
+            elo  = row.get("Elo")
+            if pd.notna(club) and pd.notna(elo):
+                result[str(club).strip()] = float(elo)
+        return result
+    except Exception as e:
+        print(f"    Warning: Club-Elo ({date}): {e}")
+        return {}
+
+
+def find_club_elo(name: str, elo_dict: dict) -> float | None:
+    """Findet Club-Elo-Rating via fuzzy Matching (analog find_team_in_model)."""
+    if name in elo_dict:
+        return elo_dict[name]
+    norm = normalize_name(name)
+    for club, elo in elo_dict.items():
+        if normalize_name(club) == norm:
+            return elo
+    for club, elo in elo_dict.items():
+        nc = normalize_name(club)
+        if norm in nc or nc in norm:
+            return elo
+    close = difflib.get_close_matches(norm,
+                                       [normalize_name(c) for c in elo_dict],
+                                       n=1, cutoff=0.6)
+    if close:
+        for club, elo in elo_dict.items():
+            if normalize_name(club) == close[0]:
+                return elo
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # FOOTBALL: DATEN LADEN
 # ═══════════════════════════════════════════════════════════════════════════════
 
