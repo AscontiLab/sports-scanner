@@ -918,6 +918,8 @@ tr:hover td { background:#f5f8ff; }
         background:#f7f9ff; border:1px solid #dde3ed; border-radius:8px; }
 .note { background:#fff8e8; border-left:3px solid #e09000; padding:10px 14px;
         color:#664400; font-size:0.82em; border-radius:0 6px 6px 0; margin:10px 0; }
+.tag3{ background:#5c2d91; color:#fff; border-radius:4px;
+       padding:2px 7px; font-size:0.75em; }
 .footer{ color:#777799; font-size:0.78em; margin-top:30px;
          border-top:1px solid #dde3ed; padding-top:14px; }
 """
@@ -971,6 +973,32 @@ def build_ou_table(bets: list) -> str:
           <td style="color:#58a6ff">{b['kelly_pct']:.1f}%</td>
           <td style="color:#8b949e">{b['lam_home']:.2f}</td>
           <td style="color:#8b949e">{b['lam_away']:.2f}</td>
+        </tr>"""
+    ths = "".join(f"<th>{h}</th>" for h in headers)
+    return f"<table><tr>{ths}</tr>{rows}</table>"
+
+
+def build_uefa_table(bets: list) -> str:
+    if not bets:
+        return '<div class="empty">Keine UEFA Value Bets gefunden.</div>'
+    headers = ["Wettbewerb", "Spiel", "Typ", "Tipp", "Anstoß",
+               "Modell-%", "Beste Quote", "Edge-%", "Kelly-%", "Modell"]
+    rows = ""
+    for b in sorted(bets, key=lambda x: -x["edge_pct"]):
+        tag = UEFA_LABELS.get(b["sport"], b["sport"])
+        ec  = edge_class(b["edge_pct"])
+        typ_label = "1X2" if b["bet_type"] == "1x2" else "O/U"
+        rows += f"""<tr>
+          <td><span class="tag3">{tag}</span></td>
+          <td><strong>{b['match']}</strong></td>
+          <td>{typ_label}</td>
+          <td>{b['tip']}</td>
+          <td>{format_dt(b['kick_off'])}</td>
+          <td>{b['model_prob']*100:.1f}%</td>
+          <td>{b['best_odds']:.2f}</td>
+          <td class="{ec}">{b['edge_pct']:.1f}%</td>
+          <td style="color:#58a6ff">{b['kelly_pct']:.1f}%</td>
+          <td style="color:#8b949e">{b['model_src']}</td>
         </tr>"""
     ths = "".join(f"<th>{h}</th>" for h in headers)
     return f"<table><tr>{ths}</tr>{rows}</table>"
