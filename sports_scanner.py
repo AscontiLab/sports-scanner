@@ -67,9 +67,10 @@ FDCO_URLS = {
 OPENLIGADB_BASE = "https://api.openligadb.de"
 
 # Schwellwerte Value Betting
-MIN_EDGE_PCT = 3.0   # Mindest-Edge in %
-MIN_ODDS     = 1.25  # Mindest-Quoten
-MAX_KELLY    = 0.05  # Max. Kelly-Anteil (5 % des Bankrolls)
+MIN_EDGE_PCT = 3.0    # Mindest-Edge in %
+MAX_EDGE_PCT = 100.0  # Max. Edge in % — höhere Werte deuten auf Datenfehler hin
+MIN_ODDS     = 1.25   # Mindest-Quoten
+MAX_KELLY    = 0.05   # Max. Kelly-Anteil (5 % des Bankrolls)
 
 # Tennis Elo-Einstellungen
 ELO_K_FACTOR  = 32
@@ -677,7 +678,7 @@ def analyze_football_match(match: dict, model: dict) -> list:
         if odds < MIN_ODDS:
             continue
         edge, kelly = compute_value(model_p, odds)
-        if edge >= MIN_EDGE_PCT / 100:
+        if MIN_EDGE_PCT / 100 <= edge <= MAX_EDGE_PCT / 100:
             bets.append({
                 "type":       "football",
                 "sport":      match.get("sport_key", ""),
@@ -729,7 +730,7 @@ def analyze_football_ou(match: dict, model: dict) -> list:
             if odds < MIN_ODDS:
                 continue
             edge, kelly = compute_value(model_p, odds)
-            if edge >= MIN_EDGE_PCT / 100:
+            if MIN_EDGE_PCT / 100 <= edge <= MAX_EDGE_PCT / 100:
                 bets.append({
                     "type":       "football_ou",
                     "sport":      match.get("sport_key", ""),
@@ -778,7 +779,7 @@ def analyze_uefa_match(match: dict, elo_dict: dict,
             if odds < MIN_ODDS:
                 continue
             edge, kelly = compute_value(model_p, odds)
-            if edge >= MIN_EDGE_PCT / 100:
+            if MIN_EDGE_PCT / 100 <= edge <= MAX_EDGE_PCT / 100:
                 bets.append({
                     "bet_type":   "1x2",
                     "sport":      match.get("sport_key", ""),
@@ -817,7 +818,7 @@ def analyze_uefa_match(match: dict, elo_dict: dict,
                         if odds < MIN_ODDS:
                             continue
                         edge, kelly = compute_value(model_p, odds)
-                        if edge >= MIN_EDGE_PCT / 100:
+                        if MIN_EDGE_PCT / 100 <= edge <= MAX_EDGE_PCT / 100:
                             bets.append({
                                 "bet_type":   "ou",
                                 "sport":      match.get("sport_key", ""),
@@ -871,7 +872,7 @@ def analyze_tennis_match(match: dict, tournament: str, elo_dict: dict) -> list:
         if odds < MIN_ODDS or not model_p:
             continue
         edge, kelly = compute_value(model_p, odds)
-        if edge >= MIN_EDGE_PCT / 100:
+        if MIN_EDGE_PCT / 100 <= edge <= MAX_EDGE_PCT / 100:
             bets.append({
                 "type":         "tennis",
                 "sport":        match.get("sport_key", ""),
@@ -1059,7 +1060,7 @@ def generate_html(football_bets: list, ou_bets: list,
 
 <div class="note">
   📌 <strong>Hinweis:</strong> Edge = (Modell-Wahrscheinlichkeit × Beste Quote) – 1.
-  Nur Bets mit Edge ≥ {MIN_EDGE_PCT}% und Quote ≥ {MIN_ODDS} werden angezeigt.
+  Nur Bets mit Edge ≥ {MIN_EDGE_PCT}% und ≤ {MAX_EDGE_PCT:.0f}% sowie Quote ≥ {MIN_ODDS} werden angezeigt.
   Kelly-Empfehlung maximal {MAX_KELLY*100:.0f}% des Bankrolls.
 </div>
 
