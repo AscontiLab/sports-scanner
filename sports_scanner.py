@@ -74,6 +74,38 @@ ELO_K_FACTOR  = 32
 ELO_INITIAL   = 1500
 ELO_YEARS     = [2022, 2023, 2024, 2025]   # ATP-Datenjahre
 
+# UEFA-Wettbewerbe
+UEFA_SPORTS = [
+    "soccer_uefa_champs_league",
+    "soccer_uefa_europa_league",
+    "soccer_uefa_europa_conference_league",
+]
+
+UEFA_LABELS = {
+    "soccer_uefa_champs_league":            "Champions League",
+    "soccer_uefa_europa_league":            "Europa League",
+    "soccer_uefa_europa_conference_league": "Conference League",
+}
+
+# Club-Elo API
+CLUBELO_URL = "http://api.clubelo.com/{date}"
+
+# Multi-Liga Poisson-Modell (Top-5-Ligen + Bundesliga 1+2)
+EUROPEAN_FDCO_URLS = [
+    "https://www.football-data.co.uk/mmz4281/2526/E0.csv",   # Premier League
+    "https://www.football-data.co.uk/mmz4281/2425/E0.csv",
+    "https://www.football-data.co.uk/mmz4281/2526/SP1.csv",  # La Liga
+    "https://www.football-data.co.uk/mmz4281/2425/SP1.csv",
+    "https://www.football-data.co.uk/mmz4281/2526/I1.csv",   # Serie A
+    "https://www.football-data.co.uk/mmz4281/2425/I1.csv",
+    "https://www.football-data.co.uk/mmz4281/2526/F1.csv",   # Ligue 1
+    "https://www.football-data.co.uk/mmz4281/2425/F1.csv",
+    "https://www.football-data.co.uk/mmz4281/2526/D1.csv",   # Bundesliga 1
+    "https://www.football-data.co.uk/mmz4281/2425/D1.csv",
+    "https://www.football-data.co.uk/mmz4281/2526/D2.csv",   # Bundesliga 2
+    "https://www.football-data.co.uk/mmz4281/2425/D2.csv",
+]
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CREDENTIALS
