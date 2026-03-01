@@ -577,6 +577,55 @@ def analyze_football_match(match: dict, model: dict) -> list:
     return bets
 
 
+def analyze_football_ou(match: dict, model: dict) -> list:
+    """Value Bets für Über/Unter-Märkte via Poisson-Modell."""
+    home_api = match["home_team"]
+    away_api = match["away_team"]
+    model_teams = model["teams"]
+
+    home_model = find_team_in_model(home_api, model_teams)
+    away_model = find_team_in_model(away_api, model_teams)
+    if not home_model or not away_model:
+        return []
+
+    probs = predict_football(home_model, away_model, model)
+    if not probs:
+        return []
+
+    lam_home = probs["lam_home"]
+    lam_away = probs["lam_away"]
+    ou_lines  = best_ou_odds_from_match(match)
+    bets      = []
+
+    for entry in ou_lines:
+        line       = entry["line"]
+        p_over, p_under = predict_ou(lam_home, lam_away, line)
+
+        for side, model_p, odds in [
+            ("Über",  p_over,  entry["over_odds"]),
+            ("Unter", p_under, entry["under_odds"]),
+        ]:
+            if odds < MIN_ODDS:
+                continue
+            edge, kelly = compute_value(model_p, odds)
+            if edge >= MIN_EDGE_PCT / 100:
+                bets.append({
+                    "type":       "football_ou",
+                    "sport":      match.get("sport_key", ""),
+                    "match":      f"{home_api} – {away_api}",
+                    "line":       line,
+                    "tip":        f"{side} {line}",
+                    "kick_off":   match["commence_time"],
+                    "model_prob": model_p,
+                    "best_odds":  odds,
+                    "edge_pct":   edge * 100,
+                    "kelly_pct":  min(kelly, MAX_KELLY) * 100,
+                    "lam_home":   lam_home,
+                    "lam_away":   lam_away,
+                })
+    return bets
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # TENNIS ANALYSE
 # ═══════════════════════════════════════════════════════════════════════════════
