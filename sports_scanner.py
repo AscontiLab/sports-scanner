@@ -142,6 +142,30 @@ def best_odds_from_match(match: dict) -> dict:
     return best
 
 
+def best_ou_odds_from_match(match: dict) -> list[dict]:
+    """
+    Extrahiert die besten Over/Under-Quoten pro Linie aus allen Bookies.
+    Gibt Liste von {line, over_odds, under_odds} zurück.
+    """
+    best: dict[float, dict] = {}  # line → {over: float, under: float}
+    for bm in match.get("bookmakers", []):
+        for market in bm.get("markets", []):
+            if market["key"] != "totals":
+                continue
+            for o in market["outcomes"]:
+                line  = float(o.get("point", 0))
+                price = float(o["price"])
+                side  = o["name"].lower()  # "over" or "under"
+                if line not in best:
+                    best[line] = {"over": 1.0, "under": 1.0}
+                best[line][side] = max(best[line][side], price)
+    result = []
+    for line, odds in sorted(best.items()):
+        if odds["over"] > 1.0 and odds["under"] > 1.0:
+            result.append({"line": line, "over_odds": odds["over"], "under_odds": odds["under"]})
+    return result
+
+
 def bookie_consensus(match: dict) -> dict:
     """Konsenswahrscheinlichkeiten (normalisierter Schnitt über alle Bookies)."""
     sums = {"home": [], "draw": [], "away": []}
