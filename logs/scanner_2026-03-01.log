@@ -1,0 +1,79 @@
+======================================
+Start: 2026-03-01 08:00:01
+======================================
+============================================================
+  Sports Value Scanner — 01.03.2026 08:00
+============================================================
+
+[⚽ Fußball] Daten laden & Modelle trainieren …
+  1. Bundesliga:
+    504 Matches, 20 Teams → trainiere Poisson …
+    OK. Home-Vorteil=0.138
+  2. Bundesliga:
+    509 Matches, 22 Teams → trainiere Poisson …
+    OK. Home-Vorteil=0.156
+  3. Liga:
+    OpenLigaDB Saison 2025: 257 Matches
+    OpenLigaDB Saison 2024: 379 Matches
+    625 Matches, 26 Teams → trainiere Poisson …
+    OK. Home-Vorteil=0.164
+
+[⚽ Fußball] Upcoming Matches via Odds API …
+  1. Bundesliga:
+    → 13 Matches | API-Requests verbleibend: 499
+    ✓ VALUE: VfB Stuttgart – VfL Wolfsburg → Unentschieden @ 5.40 | Edge 3.6%
+    ✓ VALUE: VfB Stuttgart – VfL Wolfsburg → VfL Wolfsburg @ 6.80 | Edge 46.8%
+    ✓ VALUE: Eintracht Frankfurt – SC Freiburg → Eintracht Frankfurt @ 2.21 | Edge 23.6%
+    ✓ VALUE: Hamburger SV – RB Leipzig → Hamburger SV @ 3.85 | Edge 7.0%
+    ✓ VALUE: Hamburger SV – Bayer Leverkusen → Bayer Leverkusen @ 2.13 | Edge 16.3%
+    ✓ VALUE: 1. FC Heidenheim – TSG Hoffenheim → 1. FC Heidenheim @ 5.07 | Edge 24.6%
+    ✓ VALUE: RB Leipzig – Augsburg → Unentschieden @ 5.00 | Edge 13.1%
+    ✓ VALUE: RB Leipzig – Augsburg → Augsburg @ 6.25 | Edge 13.2%
+    ✓ VALUE: SC Freiburg – Bayer Leverkusen → Bayer Leverkusen @ 2.35 | Edge 23.9%
+    ✓ VALUE: FSV Mainz 05 – VfB Stuttgart → FSV Mainz 05 @ 3.15 | Edge 8.1%
+    ✓ VALUE: VfL Wolfsburg – Hamburger SV → VfL Wolfsburg @ 2.43 | Edge 6.8%
+    ✓ VALUE: 1. FC Köln – Borussia Dortmund → 1. FC Köln @ 4.90 | Edge 18.0%
+    ✓ VALUE: FC St. Pauli – Eintracht Frankfurt → Eintracht Frankfurt @ 2.90 | Edge 54.7%
+    ✓ VALUE: Union Berlin – Werder Bremen → Werder Bremen @ 3.60 | Edge 23.5%
+  2. Bundesliga:
+    → 9 Matches | API-Requests verbleibend: 498
+    ✓ VALUE: 1. FC Magdeburg – Karlsruher SC → Karlsruher SC @ 5.10 | Edge 55.4%
+    ✓ VALUE: Hertha Berlin – 1. FC Nürnberg → 1. FC Nürnberg @ 3.65 | Edge 17.8%
+    ✓ VALUE: Eintracht Braunschweig – SC Preußen Münster → SC Preußen Münster @ 2.86 | Edge 19.0%
+    ✓ VALUE: Elversberg – 1. FC Magdeburg → Elversberg @ 1.96 | Edge 21.5%
+    ✓ VALUE: FC Schalke 04 – Arminia Bielefeld → Arminia Bielefeld @ 4.00 | Edge 34.3%
+    ✓ VALUE: 1. FC Nürnberg – Fortuna Düsseldorf → 1. FC Nürnberg @ 2.30 | Edge 9.0%
+    ✓ VALUE: SC Paderborn – Eintracht Braunschweig → SC Paderborn @ 1.64 | Edge 10.1%
+    ✓ VALUE: SV Darmstadt 98 – Holstein Kiel → SV Darmstadt 98 @ 1.95 | Edge 7.5%
+    ✓ VALUE: VfL Bochum – 1. FC Kaiserslautern → 1. FC Kaiserslautern @ 3.37 | Edge 7.1%
+  3. Liga:
+    → 13 Matches | API-Requests verbleibend: 497
+    ✓ VALUE: MSV Duisburg – TSV Havelse → MSV Duisburg @ 1.52 | Edge 8.6%
+    ✓ VALUE: Schweinfurt – 1. FC Saarbrücken → 1. FC Saarbrücken @ 1.65 | Edge 9.6%
+    ✓ VALUE: VfB Stuttgart II – FC Energie Cottbus → FC Energie Cottbus @ 2.58 | Edge 15.2%
+    ✓ VALUE: VfL Osnabrück – FC Viktoria Köln 1904 → Unentschieden @ 4.00 | Edge 8.9%
+    ✓ VALUE: VfL Osnabrück – FC Viktoria Köln 1904 → FC Viktoria Köln 1904 @ 4.10 | Edge 35.7%
+    ✓ VALUE: SC Verl – Jahn Regensburg → SC Verl @ 1.80 | Edge 8.4%
+    ✓ VALUE: SSV Ulm 1846 – TSG Hoffenheim II → TSG Hoffenheim II @ 2.70 | Edge 34.4%
+    ✓ VALUE: 1. FC Saarbrücken – Wehen Wiesbaden → Wehen Wiesbaden @ 3.65 | Edge 15.7%
+    ✓ VALUE: Alemannia Aachen – Schweinfurt → Alemannia Aachen @ 1.60 | Edge 15.6%
+    ✓ VALUE: TSV Havelse – Hansa Rostock → TSV Havelse @ 6.20 | Edge 29.8%
+    ✓ VALUE: Rot-Weiss Essen – Waldhof Mannheim → Waldhof Mannheim @ 4.00 | Edge 13.9%
+
+[🎾 Tennis] Elo-Ratings berechnen …
+    Warning: ATP 2025: 404 Client Error: Not Found for url: https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master/atp_matches_2025.csv
+  650 Spieler im Elo-Dict
+
+[🎾 Tennis] Aktive Turniere suchen …
+  0 aktive Tennis-Turniere:
+
+[📊 Report] Football Bets: 34
+[📊 Report] Tennis Bets:   0
+[📊 Report] HTML: /root/sports_scanner/output/2026-03-01/sports_signals.html
+[📊 Report] CSV:  /root/sports_scanner/output/2026-03-01/sports_signals.csv
+
+✓ Fertig!
+Ende: 2026-03-01 08:00:09  (Exit: 0)
+Sende E-Mail-Report …
+E-Mail gesendet an maikstephan.lab@gmail.com: ⚽🎾 Sports Value Scanner 01.03.2026 — 34 Bets (FB:34 TN:0)
+E-Mail erfolgreich gesendet.
