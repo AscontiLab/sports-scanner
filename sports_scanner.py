@@ -1028,11 +1028,12 @@ def build_tennis_table(bets: list) -> str:
     return f"<table><tr>{ths}</tr>{rows}</table>"
 
 
-def generate_html(football_bets: list, ou_bets: list, tennis_bets: list) -> str:
+def generate_html(football_bets: list, ou_bets: list,
+                  tennis_bets: list, uefa_bets: list) -> str:
     date_str  = datetime.now().strftime("%d.%m.%Y")
     timestamp = datetime.now().strftime("%d.%m.%Y %H:%M")
-    total     = len(football_bets) + len(ou_bets) + len(tennis_bets)
-    all_edges = [b["edge_pct"] for b in football_bets + ou_bets + tennis_bets]
+    total     = len(football_bets) + len(ou_bets) + len(tennis_bets) + len(uefa_bets)
+    all_edges = [b["edge_pct"] for b in football_bets + ou_bets + tennis_bets + uefa_bets]
     max_edge  = max(all_edges) if all_edges else 0.0
 
     return f"""<!DOCTYPE html>
@@ -1050,6 +1051,7 @@ def generate_html(football_bets: list, ou_bets: list, tennis_bets: list) -> str:
   <div class="card"><div class="val">{len(football_bets)}</div><div class="lbl">⚽ Fußball 1X2</div></div>
   <div class="card"><div class="val">{len(ou_bets)}</div><div class="lbl">⚽ Über/Unter</div></div>
   <div class="card"><div class="val">{len(tennis_bets)}</div><div class="lbl">🎾 Tennis</div></div>
+  <div class="card"><div class="val">{len(uefa_bets)}</div><div class="lbl">🏆 UEFA</div></div>
   <div class="card"><div class="val">{max_edge:.1f}%</div><div class="lbl">Max. Edge</div></div>
 </div>
 
@@ -1065,6 +1067,9 @@ def generate_html(football_bets: list, ou_bets: list, tennis_bets: list) -> str:
 <h2>⚽ Über/Unter Value Bets (Poisson-Modell)</h2>
 {build_ou_table(ou_bets)}
 
+<h2>🏆 UEFA Value Bets (Champions / Europa / Conference League)</h2>
+{build_uefa_table(uefa_bets)}
+
 <h2>🎾 Tennis Value Bets (Elo-Modell)</h2>
 {build_tennis_table(tennis_bets)}
 
@@ -1072,7 +1077,8 @@ def generate_html(football_bets: list, ou_bets: list, tennis_bets: list) -> str:
   Generiert: {timestamp} &nbsp;|&nbsp;
   Fußball-Modell: Poisson MLE (football-data.co.uk) &nbsp;|&nbsp;
   Tennis-Modell: Elo (Jeff Sackmann ATP Data) &nbsp;|&nbsp;
-  Odds: The Odds API<br>
+  Odds: The Odds API &nbsp;|&nbsp;
+  UEFA-Modell: Club-Elo + Poisson (football-data.co.uk)<br>
   ⚠️ Diese Analyse dient ausschließlich zu Informationszwecken.
   Sportwetten sind mit erheblichen Verlustrisiken verbunden.
 </div>
@@ -1102,6 +1108,7 @@ def main() -> int:
     all_football_bets: list = []
     all_ou_bets:       list = []
     all_tennis_bets:   list = []
+    all_uefa_bets:     list = []
 
     # ── FUSSBALL ────────────────────────────────────────────────────────────
     print("\n[⚽ Fußball] Daten laden & Modelle trainieren …")
@@ -1186,12 +1193,51 @@ def main() -> int:
                     print(f"    ✓ VALUE: {b['match']} → {b['tip']} "
                           f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
 
+    # ── UEFA ────────────────────────────────────────────────────────────────
+    print("\n[🏆 UEFA] Club-Elo-Ratings laden …")
+    elo_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    club_elo_dict = download_clubelo(elo_date)
+    print(f"  {len(club_elo_dict)} Clubs im Elo-Dict")
+
+    print("\n[🏆 UEFA] Europäisches Poisson-Modell trainieren …")
+    euro_df = load_european_data()
+    euro_model = None
+    if euro_df is not None and len(euro_df) >= 20:
+        n_teams = euro_df["HomeTeam"].nunique()
+        print(f"  {len(euro_df)} Matches, {n_teams} Teams → trainiere Poisson …")
+        try:
+            euro_model = fit_poisson_model(euro_df)
+            print(f"  OK. Home-Vorteil={euro_model['home_adv']:.3f}")
+        except Exception as e:
+            print(f"  Modell-Fehler: {e}")
+    else:
+        print("  Nicht genug Daten für europäisches Modell")
+
+    print("\n[🏆 UEFA] Matches via Odds API …")
+    for sport_key in UEFA_SPORTS:
+        label = UEFA_LABELS.get(sport_key, sport_key)
+        print(f"  {label}:")
+        try:
+            matches = get_odds(api_key, sport_key)
+        except Exception as e:
+            print(f"    Fehler: {e}")
+            continue
+        for match in matches:
+            bets = analyze_uefa_match(match, club_elo_dict, euro_model)
+            if bets:
+                all_uefa_bets.extend(bets)
+                for b in bets:
+                    typ = b["bet_type"].upper()
+                    print(f"    ✓ UEFA VALUE [{typ}]: {b['match']} → {b['tip']} "
+                          f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
+
     # ── REPORT ──────────────────────────────────────────────────────────────
     print(f"\n[📊 Report] Football Bets: {len(all_football_bets)}")
     print(f"[📊 Report] O/U Bets:       {len(all_ou_bets)}")
     print(f"[📊 Report] Tennis Bets:   {len(all_tennis_bets)}")
+    print(f"[📊 Report] UEFA Bets:      {len(all_uefa_bets)}")
 
-    html      = generate_html(all_football_bets, all_ou_bets, all_tennis_bets)
+    html      = generate_html(all_football_bets, all_ou_bets, all_tennis_bets, all_uefa_bets)
     html_path = out_dir / "sports_signals.html"
     html_path.write_text(html, encoding="utf-8")
     print(f"[📊 Report] HTML: {html_path}")
@@ -1226,6 +1272,23 @@ def main() -> int:
             "λ-Heim":     f"{b['lam_home']:.2f}",
             "λ-Gast":     f"{b['lam_away']:.2f}",
         })
+    for b in all_uefa_bets:
+        row = {
+            "Typ":        f"UEFA {b['bet_type'].upper()}",
+            "Liga":       UEFA_LABELS.get(b["sport"], b["sport"]),
+            "Spiel":      b["match"],
+            "Tipp":       b["tip"],
+            "Anstoß":     b["kick_off"],
+            "Modell-%":   f"{b['model_prob']*100:.1f}",
+            "BestOdds":   f"{b['best_odds']:.2f}",
+            "Edge-%":     f"{b['edge_pct']:.1f}",
+            "Kelly-%":    f"{b['kelly_pct']:.1f}",
+            "Modell":     b["model_src"],
+        }
+        if b["bet_type"] == "ou":
+            row["λ-Heim"] = f"{b.get('lam_home', 0):.2f}"
+            row["λ-Gast"] = f"{b.get('lam_away', 0):.2f}"
+        rows.append(row)
     for b in all_tennis_bets:
         rows.append({
             "Typ":        "Tennis",
