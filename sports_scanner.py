@@ -745,6 +745,30 @@ def build_football_table(bets: list) -> str:
     return f"<table><tr>{ths}</tr>{rows}</table>"
 
 
+def build_ou_table(bets: list) -> str:
+    if not bets:
+        return '<div class="empty">Keine Über/Unter Value Bets gefunden.</div>'
+    headers = ["Liga", "Spiel", "Tipp", "Anstoß", "Modell-%", "Beste Quote", "Edge-%", "Kelly-%", "λ Heim", "λ Gast"]
+    rows = ""
+    for b in sorted(bets, key=lambda x: -x["edge_pct"]):
+        tag = SPORT_LABELS.get(b["sport"], b["sport"])
+        ec  = edge_class(b["edge_pct"])
+        rows += f"""<tr>
+          <td><span class="tag">{tag}</span></td>
+          <td><strong>{b['match']}</strong></td>
+          <td>{b['tip']}</td>
+          <td>{format_dt(b['kick_off'])}</td>
+          <td>{b['model_prob']*100:.1f}%</td>
+          <td>{b['best_odds']:.2f}</td>
+          <td class="{ec}">{b['edge_pct']:.1f}%</td>
+          <td style="color:#58a6ff">{b['kelly_pct']:.1f}%</td>
+          <td style="color:#8b949e">{b['lam_home']:.2f}</td>
+          <td style="color:#8b949e">{b['lam_away']:.2f}</td>
+        </tr>"""
+    ths = "".join(f"<th>{h}</th>" for h in headers)
+    return f"<table><tr>{ths}</tr>{rows}</table>"
+
+
 def build_tennis_table(bets: list) -> str:
     if not bets:
         return '<div class="empty">Keine aktiven Tennis-Turniere mit ausreichend Odds gefunden.</div>'
