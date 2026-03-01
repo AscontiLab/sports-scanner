@@ -2,11 +2,13 @@
 """
 Sports Betting Value Scanner
 ────────────────────────────
-Analysiert Fußball (1./2./3. Bundesliga) mit Poisson-Modell
-und Tennis (ATP) mit Elo-Modell.
+Analysiert Fußball (1./2./3. Bundesliga) und UEFA-Wettbewerbe
+(Champions League, Europa League, Conference League) mit Poisson-Modell
+sowie Tennis (ATP) mit Elo-Modell.
 
 Datenquellen:
-  - Fußball-History: football-data.co.uk
+  - Fußball-History: football-data.co.uk (Bundesliga + Top-5-Ligen)
+  - UEFA 1X2-Modell: Club-Elo (api.clubelo.com)
   - Tennis-History:  Jeff Sackmann / tennis_atp (GitHub)
   - Live-Odds:       The Odds API (v4)
 """
@@ -136,11 +138,11 @@ def get_active_sports(api_key: str) -> list:
     return r.json()
 
 
-def get_odds(api_key: str, sport_key: str) -> list:
+def get_odds(api_key: str, sport_key: str, markets: str = "h2h,totals") -> list:
     params = {
         "apiKey":     api_key,
         "regions":    "eu",
-        "markets":    "h2h,totals",
+        "markets":    markets,
         "oddsFormat": "decimal",
         "dateFormat": "iso",
     }
@@ -250,28 +252,6 @@ def download_clubelo(date: str) -> dict:
     except Exception as e:
         print(f"    Warning: Club-Elo ({date}): {e}")
         return {}
-
-
-def find_club_elo(name: str, elo_dict: dict) -> float | None:
-    """Findet Club-Elo-Rating via fuzzy Matching (analog find_team_in_model)."""
-    if name in elo_dict:
-        return elo_dict[name]
-    norm = normalize_name(name)
-    for club, elo in elo_dict.items():
-        if normalize_name(club) == norm:
-            return elo
-    for club, elo in elo_dict.items():
-        nc = normalize_name(club)
-        if norm in nc or nc in norm:
-            return elo
-    close = difflib.get_close_matches(norm,
-                                       [normalize_name(c) for c in elo_dict],
-                                       n=1, cutoff=0.6)
-    if close:
-        for club, elo in elo_dict.items():
-            if normalize_name(club) == close[0]:
-                return elo
-    return None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -539,6 +519,28 @@ def find_team_in_model(api_name: str, model_teams: list) -> str | None:
         for t in model_teams:
             if normalize_name(t) == norm_match:
                 return t
+    return None
+
+
+def find_club_elo(name: str, elo_dict: dict) -> float | None:
+    """Findet Club-Elo-Rating via fuzzy Matching (analog find_team_in_model)."""
+    if name in elo_dict:
+        return elo_dict[name]
+    norm = normalize_name(name)
+    for club, elo in elo_dict.items():
+        if normalize_name(club) == norm:
+            return elo
+    for club, elo in elo_dict.items():
+        nc = normalize_name(club)
+        if norm in nc or nc in norm:
+            return elo
+    close = difflib.get_close_matches(norm,
+                                       [normalize_name(c) for c in elo_dict],
+                                       n=1, cutoff=0.6)
+    if close:
+        for club, elo in elo_dict.items():
+            if normalize_name(club) == close[0]:
+                return elo
     return None
 
 
@@ -1181,7 +1183,7 @@ def main() -> int:
         title     = sport["title"]
         print(f"  {title}:")
         try:
-            matches = get_odds(api_key, sport_key)
+            matches = get_odds(api_key, sport_key, markets="h2h")
         except Exception as e:
             print(f"    Fehler: {e}")
             continue
