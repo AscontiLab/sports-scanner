@@ -793,11 +793,11 @@ def build_tennis_table(bets: list) -> str:
     return f"<table><tr>{ths}</tr>{rows}</table>"
 
 
-def generate_html(football_bets: list, tennis_bets: list) -> str:
+def generate_html(football_bets: list, ou_bets: list, tennis_bets: list) -> str:
     date_str  = datetime.now().strftime("%d.%m.%Y")
     timestamp = datetime.now().strftime("%d.%m.%Y %H:%M")
-    total     = len(football_bets) + len(tennis_bets)
-    all_edges = [b["edge_pct"] for b in football_bets + tennis_bets]
+    total     = len(football_bets) + len(ou_bets) + len(tennis_bets)
+    all_edges = [b["edge_pct"] for b in football_bets + ou_bets + tennis_bets]
     max_edge  = max(all_edges) if all_edges else 0.0
 
     return f"""<!DOCTYPE html>
@@ -812,7 +812,8 @@ def generate_html(football_bets: list, tennis_bets: list) -> str:
 
 <div class="summary">
   <div class="card"><div class="val">{total}</div><div class="lbl">Value Bets gesamt</div></div>
-  <div class="card"><div class="val">{len(football_bets)}</div><div class="lbl">⚽ Fußball</div></div>
+  <div class="card"><div class="val">{len(football_bets)}</div><div class="lbl">⚽ Fußball 1X2</div></div>
+  <div class="card"><div class="val">{len(ou_bets)}</div><div class="lbl">⚽ Über/Unter</div></div>
   <div class="card"><div class="val">{len(tennis_bets)}</div><div class="lbl">🎾 Tennis</div></div>
   <div class="card"><div class="val">{max_edge:.1f}%</div><div class="lbl">Max. Edge</div></div>
 </div>
@@ -825,6 +826,9 @@ def generate_html(football_bets: list, tennis_bets: list) -> str:
 
 <h2>⚽ Fußball Value Bets (Poisson-Modell)</h2>
 {build_football_table(football_bets)}
+
+<h2>⚽ Über/Unter Value Bets (Poisson-Modell)</h2>
+{build_ou_table(ou_bets)}
 
 <h2>🎾 Tennis Value Bets (Elo-Modell)</h2>
 {build_tennis_table(tennis_bets)}
@@ -861,6 +865,7 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     all_football_bets: list = []
+    all_ou_bets:       list = []
     all_tennis_bets:   list = []
 
     # ── FUSSBALL ────────────────────────────────────────────────────────────
@@ -905,6 +910,12 @@ def main() -> int:
                 for b in bets:
                     print(f"    ✓ VALUE: {b['match']} → {b['tip']} "
                           f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
+            ou_bets_match = analyze_football_ou(match, model)
+            if ou_bets_match:
+                all_ou_bets.extend(ou_bets_match)
+                for b in ou_bets_match:
+                    print(f"    ✓ O/U VALUE: {b['match']} → {b['tip']} "
+                          f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
 
     # ── TENNIS ──────────────────────────────────────────────────────────────
     print("\n[🎾 Tennis] Elo-Ratings berechnen …")
@@ -942,9 +953,10 @@ def main() -> int:
 
     # ── REPORT ──────────────────────────────────────────────────────────────
     print(f"\n[📊 Report] Football Bets: {len(all_football_bets)}")
+    print(f"[📊 Report] O/U Bets:       {len(all_ou_bets)}")
     print(f"[📊 Report] Tennis Bets:   {len(all_tennis_bets)}")
 
-    html      = generate_html(all_football_bets, all_tennis_bets)
+    html      = generate_html(all_football_bets, all_ou_bets, all_tennis_bets)
     html_path = out_dir / "sports_signals.html"
     html_path.write_text(html, encoding="utf-8")
     print(f"[📊 Report] HTML: {html_path}")
@@ -954,6 +966,20 @@ def main() -> int:
     for b in all_football_bets:
         rows.append({
             "Typ":        "Fußball",
+            "Liga":       SPORT_LABELS.get(b["sport"], b["sport"]),
+            "Spiel":      b["match"],
+            "Tipp":       b["tip"],
+            "Anstoß":     b["kick_off"],
+            "Modell-%":   f"{b['model_prob']*100:.1f}",
+            "BestOdds":   f"{b['best_odds']:.2f}",
+            "Edge-%":     f"{b['edge_pct']:.1f}",
+            "Kelly-%":    f"{b['kelly_pct']:.1f}",
+            "λ-Heim":     f"{b['lam_home']:.2f}",
+            "λ-Gast":     f"{b['lam_away']:.2f}",
+        })
+    for b in all_ou_bets:
+        rows.append({
+            "Typ":        "Fußball O/U",
             "Liga":       SPORT_LABELS.get(b["sport"], b["sport"]),
             "Spiel":      b["match"],
             "Tipp":       b["tip"],
