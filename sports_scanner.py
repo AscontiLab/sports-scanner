@@ -599,6 +599,8 @@ def analyze_football_ou(match: dict, model: dict) -> list:
 
     for entry in ou_lines:
         line       = entry["line"]
+        if abs(line - round(line)) < 1e-9:
+            continue  # ganzzahlige Linien: Push-Fall nicht modelliert
         p_over, p_under = predict_ou(lam_home, lam_away, line)
 
         for side, model_p, odds in [
