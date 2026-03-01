@@ -746,6 +746,94 @@ def analyze_football_ou(match: dict, model: dict) -> list:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# UEFA ANALYSE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def analyze_uefa_match(match: dict, elo_dict: dict,
+                       euro_model: dict | None) -> list:
+    """
+    Value Bets für UEFA-Matches:
+    - 1X2 via Club-Elo (elo_to_football_1x2)
+    - O/U  via Multi-Liga Poisson-Modell (euro_model)
+    """
+    home_api = match["home_team"]
+    away_api = match["away_team"]
+    best     = best_odds_from_match(match)
+    bets     = []
+
+    # ── 1X2 via Club-Elo ────────────────────────────────────────────────────
+    elo_home = find_club_elo(home_api, elo_dict)
+    elo_away = find_club_elo(away_api, elo_dict)
+
+    if elo_home is not None and elo_away is not None:
+        p_home, p_draw, p_away = elo_to_football_1x2(elo_home, elo_away)
+        labels = {"home": home_api, "draw": "Unentschieden", "away": away_api}
+        probs  = {"home": p_home,   "draw": p_draw,          "away": p_away}
+
+        for outcome in ("home", "draw", "away"):
+            odds    = best[outcome]
+            model_p = probs[outcome]
+            if odds < MIN_ODDS:
+                continue
+            edge, kelly = compute_value(model_p, odds)
+            if edge >= MIN_EDGE_PCT / 100:
+                bets.append({
+                    "bet_type":   "1x2",
+                    "sport":      match.get("sport_key", ""),
+                    "match":      f"{home_api} – {away_api}",
+                    "tip":        labels[outcome],
+                    "kick_off":   match["commence_time"],
+                    "model_prob": model_p,
+                    "best_odds":  odds,
+                    "edge_pct":   edge * 100,
+                    "kelly_pct":  min(kelly, MAX_KELLY) * 100,
+                    "model_src":  f"Club-Elo ({int(elo_home)}/{int(elo_away)})",
+                })
+
+    # ── O/U via Poisson ─────────────────────────────────────────────────────
+    if euro_model:
+        home_model = find_team_in_model(home_api, euro_model["teams"])
+        away_model = find_team_in_model(away_api, euro_model["teams"])
+
+        if home_model and away_model:
+            probs_eu = predict_football(home_model, away_model, euro_model)
+            if probs_eu:
+                lam_home = probs_eu["lam_home"]
+                lam_away = probs_eu["lam_away"]
+                ou_lines = best_ou_odds_from_match(match)
+
+                for entry in ou_lines:
+                    line = entry["line"]
+                    if abs(line - round(line)) < 1e-9:
+                        continue  # ganzzahlige Linien: Push nicht modelliert
+                    p_over, p_under = predict_ou(lam_home, lam_away, line)
+
+                    for side, model_p, odds in [
+                        ("Über",  p_over,  entry["over_odds"]),
+                        ("Unter", p_under, entry["under_odds"]),
+                    ]:
+                        if odds < MIN_ODDS:
+                            continue
+                        edge, kelly = compute_value(model_p, odds)
+                        if edge >= MIN_EDGE_PCT / 100:
+                            bets.append({
+                                "bet_type":   "ou",
+                                "sport":      match.get("sport_key", ""),
+                                "match":      f"{home_api} – {away_api}",
+                                "tip":        f"{side} {line}",
+                                "kick_off":   match["commence_time"],
+                                "model_prob": model_p,
+                                "best_odds":  odds,
+                                "edge_pct":   edge * 100,
+                                "kelly_pct":  min(kelly, MAX_KELLY) * 100,
+                                "model_src":  "Poisson",
+                                "lam_home":   lam_home,
+                                "lam_away":   lam_away,
+                            })
+    return bets
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # TENNIS ANALYSE
 # ═══════════════════════════════════════════════════════════════════════════════
 
