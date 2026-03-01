@@ -459,6 +459,23 @@ def predict_ou(lam_home: float, lam_away: float, line: float) -> tuple[float, fl
     return p_over, p_under
 
 
+def elo_to_football_1x2(elo_home: float, elo_away: float,
+                         home_adv: float = 65.0) -> tuple[float, float, float]:
+    """
+    Konvertiert Club-Elo-Ratings in 1X2-Wahrscheinlichkeiten für Fußball.
+    home_adv: Heimvorteil in Elo-Punkten (Standard: 65 für UEFA-Heimspiele).
+    Gibt (p_home, p_draw, p_away) zurück.
+    """
+    dr      = elo_home + home_adv - elo_away
+    e_home  = 1.0 / (1.0 + 10.0 ** (-dr / 400.0))
+    # Unentschieden: max ~28% bei ausgeglichenem Spiel, sinkt bei Favoriten
+    p_draw  = 0.28 * math.exp(-2.0 * (e_home - 0.5) ** 2)
+    remaining = 1.0 - p_draw
+    p_home  = e_home * remaining
+    p_away  = (1.0 - e_home) * remaining
+    return p_home, p_draw, p_away
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # FOOTBALL: TEAM-NAMEN-MATCHING
 # ═══════════════════════════════════════════════════════════════════════════════
