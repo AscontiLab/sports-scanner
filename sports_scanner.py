@@ -372,6 +372,26 @@ def load_football_data(sport_key: str) -> pd.DataFrame | None:
     return combined
 
 
+def load_european_data() -> pd.DataFrame | None:
+    """
+    Lädt Matchdaten aus Top-5-Ligen + Bundesliga 1+2 für das europäische
+    Poisson-Modell (O/U bei UEFA-Wettbewerben).
+    """
+    frames = []
+    for url in EUROPEAN_FDCO_URLS:
+        df_raw = download_fdco(url)
+        if df_raw is not None:
+            df = standardize_fdco(df_raw)
+            if df is not None and len(df) > 5:
+                frames.append(df)
+    if not frames:
+        return None
+    combined = pd.concat(frames, ignore_index=True).drop_duplicates(
+        subset=["HomeTeam", "AwayTeam", "FTHG", "FTAG"]
+    )
+    return combined
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # FOOTBALL: POISSON-MODELL (Dixon-Coles-Stil)
 # ═══════════════════════════════════════════════════════════════════════════════
