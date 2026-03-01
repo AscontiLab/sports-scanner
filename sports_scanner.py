@@ -1050,8 +1050,8 @@ def generate_html(football_bets: list, ou_bets: list,
   <div class="card"><div class="val">{total}</div><div class="lbl">Value Bets gesamt</div></div>
   <div class="card"><div class="val">{len(football_bets)}</div><div class="lbl">⚽ Fußball 1X2</div></div>
   <div class="card"><div class="val">{len(ou_bets)}</div><div class="lbl">⚽ Über/Unter</div></div>
-  <div class="card"><div class="val">{len(tennis_bets)}</div><div class="lbl">🎾 Tennis</div></div>
   <div class="card"><div class="val">{len(uefa_bets)}</div><div class="lbl">🏆 UEFA</div></div>
+  <div class="card"><div class="val">{len(tennis_bets)}</div><div class="lbl">🎾 Tennis</div></div>
   <div class="card"><div class="val">{max_edge:.1f}%</div><div class="lbl">Max. Edge</div></div>
 </div>
 
@@ -1233,9 +1233,9 @@ def main() -> int:
 
     # ── REPORT ──────────────────────────────────────────────────────────────
     print(f"\n[📊 Report] Football Bets: {len(all_football_bets)}")
-    print(f"[📊 Report] O/U Bets:       {len(all_ou_bets)}")
+    print(f"[📊 Report] O/U Bets:      {len(all_ou_bets)}")
     print(f"[📊 Report] Tennis Bets:   {len(all_tennis_bets)}")
-    print(f"[📊 Report] UEFA Bets:      {len(all_uefa_bets)}")
+    print(f"[📊 Report] UEFA Bets:     {len(all_uefa_bets)}")
 
     html      = generate_html(all_football_bets, all_ou_bets, all_tennis_bets, all_uefa_bets)
     html_path = out_dir / "sports_signals.html"
