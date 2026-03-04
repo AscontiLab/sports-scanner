@@ -2,7 +2,7 @@
 """
 Sports Betting Value Scanner
 ────────────────────────────
-Analysiert Fußball (1./2./3. Bundesliga) und UEFA-Wettbewerbe
+Analysiert Fußball (1./2./3. Bundesliga, Premier League) und UEFA-Wettbewerbe
 (Champions League, Europa League, Conference League) mit Poisson-Modell
 sowie Tennis (ATP) mit Elo-Modell.
 
@@ -41,13 +41,15 @@ FOOTBALL_SPORTS = [
     "soccer_germany_bundesliga",
     "soccer_germany_bundesliga2",
     "soccer_germany_liga3",
+    "soccer_england_premier_league",
 ]
 
 SPORT_LABELS = {
-    "soccer_germany_bundesliga":  "1. Bundesliga",
-    "soccer_germany_bundesliga2": "2. Bundesliga",
-    "soccer_germany_liga3":       "3. Liga",
-    "soccer_germany_dfb_pokal":   "DFB-Pokal",
+    "soccer_germany_bundesliga":       "1. Bundesliga",
+    "soccer_germany_bundesliga2":      "2. Bundesliga",
+    "soccer_germany_liga3":            "3. Liga",
+    "soccer_germany_dfb_pokal":        "DFB-Pokal",
+    "soccer_england_premier_league":   "Premier League",
 }
 
 # football-data.co.uk URLs (D1/D2 = Standardformat)
@@ -59,6 +61,10 @@ FDCO_URLS = {
     "soccer_germany_bundesliga2": [
         "https://www.football-data.co.uk/mmz4281/2526/D2.csv",
         "https://www.football-data.co.uk/mmz4281/2425/D2.csv",
+    ],
+    "soccer_england_premier_league": [
+        "https://www.football-data.co.uk/mmz4281/2526/E0.csv",
+        "https://www.football-data.co.uk/mmz4281/2425/E0.csv",
     ],
     # 3. Liga kommt von OpenLigaDB (s. load_liga3_data)
 }
