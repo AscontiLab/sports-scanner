@@ -41,7 +41,7 @@ FOOTBALL_SPORTS = [
     "soccer_germany_bundesliga",
     "soccer_germany_bundesliga2",
     "soccer_germany_liga3",
-    "soccer_england_premier_league",
+    "soccer_epl",
 ]
 
 SPORT_LABELS = {
@@ -49,7 +49,7 @@ SPORT_LABELS = {
     "soccer_germany_bundesliga2":      "2. Bundesliga",
     "soccer_germany_liga3":            "3. Liga",
     "soccer_germany_dfb_pokal":        "DFB-Pokal",
-    "soccer_england_premier_league":   "Premier League",
+    "soccer_epl":                      "Premier League",
 }
 
 # football-data.co.uk URLs (D1/D2 = Standardformat)
@@ -62,7 +62,7 @@ FDCO_URLS = {
         "https://www.football-data.co.uk/mmz4281/2526/D2.csv",
         "https://www.football-data.co.uk/mmz4281/2425/D2.csv",
     ],
-    "soccer_england_premier_league": [
+    "soccer_epl": [
         "https://www.football-data.co.uk/mmz4281/2526/E0.csv",
         "https://www.football-data.co.uk/mmz4281/2425/E0.csv",
     ],
@@ -944,7 +944,7 @@ def build_football_table(bets: list) -> str:
         return '<div class="empty">Keine Football-Value-Bets gefunden – Modell benötigt ausreichend historische Matches für alle Teams.</div>'
     headers = ["Liga", "Spiel", "Tipp", "Anstoß", "Modell-%", "Beste Quote", "Edge-%", "Kelly-%", "λ Heim", "λ Gast"]
     rows = ""
-    for b in sorted(bets, key=lambda x: -x["edge_pct"]):
+    for b in sorted(bets, key=lambda x: (x["kick_off"], -x["edge_pct"])):
         tag   = SPORT_LABELS.get(b["sport"], b["sport"])
         ec    = edge_class(b["edge_pct"])
         rows += f"""<tr>
@@ -968,7 +968,7 @@ def build_ou_table(bets: list) -> str:
         return '<div class="empty">Keine Über/Unter Value Bets gefunden.</div>'
     headers = ["Liga", "Spiel", "Tipp", "Anstoß", "Modell-%", "Beste Quote", "Edge-%", "Kelly-%", "λ Heim", "λ Gast"]
     rows = ""
-    for b in sorted(bets, key=lambda x: -x["edge_pct"]):
+    for b in sorted(bets, key=lambda x: (x["kick_off"], -x["edge_pct"])):
         tag = SPORT_LABELS.get(b["sport"], b["sport"])
         ec  = edge_class(b["edge_pct"])
         rows += f"""<tr>
@@ -993,7 +993,7 @@ def build_uefa_table(bets: list) -> str:
     headers = ["Wettbewerb", "Spiel", "Typ", "Tipp", "Anstoß",
                "Modell-%", "Beste Quote", "Edge-%", "Kelly-%", "Modell"]
     rows = ""
-    for b in sorted(bets, key=lambda x: -x["edge_pct"]):
+    for b in sorted(bets, key=lambda x: (x["kick_off"], -x["edge_pct"])):
         tag = UEFA_LABELS.get(b["sport"], b["sport"])
         ec  = edge_class(b["edge_pct"])
         typ_label = "1X2" if b["bet_type"] == "1x2" else "O/U"
@@ -1018,7 +1018,7 @@ def build_tennis_table(bets: list) -> str:
         return '<div class="empty">Keine aktiven Tennis-Turniere mit ausreichend Odds gefunden.</div>'
     headers = ["Turnier", "Spiel", "Tipp", "Zeitpunkt", "Modell-%", "Beste Quote", "Edge-%", "Kelly-%", "Elo", "Modell"]
     rows = ""
-    for b in sorted(bets, key=lambda x: -x["edge_pct"]):
+    for b in sorted(bets, key=lambda x: (x["kick_off"], -x["edge_pct"])):
         ec   = edge_class(b["edge_pct"])
         elo  = str(b["elo"]) if b["elo"] else "–"
         rows += f"""<tr>
