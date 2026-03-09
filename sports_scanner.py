@@ -1,1 +1,1334 @@
-IyEvdXNyL2Jpbi9lbnYgcHl0aG9uMwoiIiIKU3BvcnRzIEJldHRpbmcgVmFsdWUgU2Nhbm5lcgrilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIAKQW5hbHlzaWVydCBGdcOfYmFsbCAoMS4vMi4vMy4gQnVuZGVzbGlnYSwgUHJlbWllciBMZWFndWUpIHVuZCBVRUZBLVdldHRiZXdlcmJlCihDaGFtcGlvbnMgTGVhZ3VlLCBFdXJvcGEgTGVhZ3VlLCBDb25mZXJlbmNlIExlYWd1ZSkgbWl0IFBvaXNzb24tTW9kZWxsCnNvd2llIFRlbm5pcyAoQVRQKSBtaXQgRWxvLU1vZGVsbC4KCkRhdGVucXVlbGxlbjoKICAtIEZ1w59iYWxsLUhpc3Rvcnk6IGZvb3RiYWxsLWRhdGEuY28udWsgKEJ1bmRlc2xpZ2EgKyBUb3AtNS1MaWdlbikKICAtIFVFRkEgMVgyLU1vZGVsbDogQ2x1Yi1FbG8gKGFwaS5jbHViZWxvLmNvbSkKICAtIFRlbm5pcy1IaXN0b3J5OiAgSmVmZiBTYWNrbWFubiAvIHRlbm5pc19hdHAgKEdpdEh1YikKICAtIExpdmUtT2RkczogICAgICAgVGhlIE9kZHMgQVBJICh2NCkKIiIiCgppbXBvcnQgc3lzCmltcG9ydCBqc29uCmltcG9ydCBtYXRoCmltcG9ydCBkaWZmbGliCmltcG9ydCB3YXJuaW5ncwppbXBvcnQgcmVxdWVzdHMKaW1wb3J0IG51bXB5IGFzIG5wCmltcG9ydCBwYW5kYXMgYXMgcGQKZnJvbSBpbyBpbXBvcnQgU3RyaW5nSU8KZnJvbSBkYXRldGltZSBpbXBvcnQgZGF0ZXRpbWUsIHRpbWV6b25lCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aApmcm9tIHNjaXB5LnN0YXRzIGltcG9ydCBwb2lzc29uCmZyb20gc2NpcHkub3B0aW1pemUgaW1wb3J0IG1pbmltaXplCgp3YXJuaW5ncy5maWx0ZXJ3YXJuaW5ncygiaWdub3JlIikKClNDUklQVF9ESVIgPSBQYXRoKF9fZmlsZV9fKS5wYXJlbnQKT1VUUFVUX0RJUiAgPSBTQ1JJUFRfRElSIC8gIm91dHB1dCIKQ1JFRFNfRklMRSAgPSBQYXRoLmhvbWUoKSAvICIuc3RvY2tfc2Nhbm5lcl9jcmVkZW50aWFscyIKCiMg4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQCiMgS09ORklHVVJBVElPTgojIOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkAoKRk9PVEJBTF9TUE9SVFMgPSBbCiAgICAic29jY2VyX2dlcm1hbnlfYnVuZGVzbGlnYSIsCiAgICAic29jY2VyX2dlcm1hbnlfYnVuZGVzbGlnYTIiLAogICAgInNvY2Nlcl9nZXJtYW55X2xpZ2EzIiwKICAgICJzb2NjZXJfZXBsIiwKXQoKU1BPUlRfTEFCRUxTID0gewogICAgInNvY2Nlcl9nZXJtYW55X2J1bmRlc2xpZ2EiOiAgICAgICAiMS4gQnVuZGVzbGlnYSIsCiAgICAic29jY2VyX2dlcm1hbnlfYnVuZGVzbGlnYTIiOiAgICAgICIyLiBCdW5kZXNsaWdhIiwKICAgICJzb2NjZXJfZ2VybWFueV9saWdhMyI6ICAgICAgICAgICAgIjMuIExpZ2EiLAogICAgInNvY2Nlcl9nZXJtYW55X2RmYl9wb2thbCI6ICAgICAgICAiREZCLVBva2FsIiwKICAgICJzb2NjZXJfZXBsIjogICAgICAgICAgICAgICAgICAgICAgIlByZW1pZXIgTGVhZ3VlIiwKfQoKIyBmb290YmFsbC1kYXRhLmNvLnVrIFVSTHMgKEQxL0QyID0gU3RhbmRhcmRmb3JtYXQpCkZEQ09fVVJMUyA9IHsKICAgICJzb2NjZXJfZ2VybWFueV9idW5kZXNsaWdhIjogIFsKICAgICAgICAiaHR0cHM6Ly93d3cuZm9vdGJhbGwtZGF0YS5jby51ay9tbXo0MjgxLzI1MjYvRDEuY3N2IiwKICAgICAgICAiaHR0cHM6Ly93d3cuZm9vdGJhbGwtZGF0YS5jby51ay9tbXo0MjgxLzI0MjUvRDEuY3N2IiwKICAgIF0sCiAgICAic29jY2VyX2dlcm1hbnlfYnVuZGVzbGlnYTIiOiBbCiAgICAgICAgImh0dHBzOi8vd3d3LmZvb3RiYWxsLWRhdGEuY28udWsvbW16NDI4MS8yNTI2L0QyLmNzdiIsCiAgICAgICAgImh0dHBzOi8vd3d3LmZvb3RiYWxsLWRhdGEuY28udWsvbW16NDI4MS8yNDI1L0QyLmNzdiIsCiAgICBdLAogICAgInNvY2Nlcl9lcGwiOiBbCiAgICAgICAgImh0dHBzOi8vd3d3LmZvb3RiYWxsLWRhdGEuY28udWsvbW16NDI4MS8yNTI2L0UwLmNzdiIsCiAgICAgICAgImh0dHBzOi8vd3d3LmZvb3RiYWxsLWRhdGEuY28udWsvbW16NDI4MS8yNDI1L0UwLmNzdiIsCiAgICBdLAogICAgIyAzLiBMaWdhIGtvbW10IHZvbiBPcGVuTGlnYURCIChzLiBsb2FkX2xpZ2EzX2RhdGEpCn0KCiMgT3Blbkxpb2FEQiBBUEkgZsO8ciAzLiBMaWdhCk9QRU5MSUdBREJfQkFTRSA9ICJodHRwczovL2FwaS5vcGVubGlnYWRiLmRlIgoKIyBTY2h3ZWxsd2VydGUgVmFsdWUgQmV0dGluZwpNSU5fRURHRV9QQ1QgPSAzLjAgICAgIyBNaW5kZXN0LUVkZ2UgaW4gJQpNQVhfRURHRV9QQ1QgPSAxMDAuMCAgIyBNYXguIEVkZ2UgaW4gJSDigJQgaMO2aGVyZSBXZXJ0ZSBkZXV0ZW4gYXVmIERhdGVuZmVobGVyIGhpbgpNSU5fT0REUyAgICAgPSAxLjI1ICAgIyBNaW5kZXN0LVF1b3RlbgpNQVhfS0VMTFkgICAgPSAwLjA1ICAgIyBNYXguIEtlbGx5LUFudGVpbCAoNSAlIGRlcyBCYW5rcm9sbHMpCgojIFRlbm5pcyBFbG8tRWluc3RlbGx1bmdlbgpFTE9fS19GQUNUT1IgID0gMzIKRUxPX0lOSVRJQUwgICA9IDE1MDAKRUVZWUVBU1MgICAgID0gbGlzdChyYW5nZShkYXRldGltZS5ub3coKS55ZWFyIC0gMywgZGF0ZXRpbWUubm93KCkueWVhciArIDEpKQoKIyBVRUZBLVdldHRiZXdlcmJlClVFRkFfU1BPUlRTID0gWwogICAgInNvY2Nlcl91ZWZhX2NoYW1wc19sZWFndWUiLAogICAgInNvY2Nlcl91ZWZhX2V1cm9wYV9sZWFndWUiLAogICAgInNvY2Nlcl91ZWZhX2V1cm9wYV9jb25mZXJlbmNlX2xlYWd1ZSIsCl0KClVFRkFfTEFCRUxTID0gewogICAgInNvY2Nlcl91ZWZhX2NoYW1wc19sZWFndWUiOiAgICAgICAgICAgICJDaGFtcGlvbnMgTGVhZ3VlIiwKICAgICJzb2NjZXJfdWVmYV9ldXJvcGFfbGVhZ3VlIjogICAgICAgICAgICAiRXVyb3BhIExlYWd1ZSIsCiAgICAic29jY2VyX3VlZmFfZXVyb3BhX2NvbmZlcmVuY2VfbGVhZ3VlIjogIkNvbmZlcmVuY2UgTGVhZ3VlIiwKfQoKIyBDbHViLUVsbyBBUEkKQ0xVQkVMT19VUkwgPSAiaHR0cDovL2FwaS5jbHViZWxvLmNvbS97ZGF0ZX0iCgojIE11bHRpLUxpZ2EgUG9pc3Nvbi1Nb2RlbGwgKFRvcC01LUxpZ2VuICsgQnVuZGVzbGlnYSAxKzIpCkVVUk9QRUFOX0ZEQ09fVVJMUyA9IFsKICAgICJodHRwczovL3d3dy5mb290YmFsbC1kYXRhLmNvLnVrL21tejQyODEvMjUyNi9FMC5jc3YiLCAgICMgUHJlbWllciBMZWFndWUKICAgICJodHRwczovL3d3dy5mb290YmFsbC1kYXRhLmNvLnVrL21tejQyODEvMjQyNS9FMC5jc3YiLAogICAgImh0dHBzOi8vd3d3LmZvb3RiYWxsLWRhdGEuY28udWsvbW16NDI4MS8yNTI2L1NQMS5jc3YiLCAgIyBMYSBMaWdhCiAgICAiaHR0cHM6Ly93d3cuZm9vdGJhbGwtZGF0YS5jby51ay9tbXo0MjgxLzI0MjUvU1AxLmNzdiIsCiAgICAiaHR0cHM6Ly93d3cuZm9vdGJhbGwtZGF0YS5jby51ay9tbXo0MjgxLzI1MjYvSTEuY3N2IiwgICAjIFNlcmllIEEKICAgICJodHRwczovL3d3dy5mb290YmFsbC1kYXRhLmNvLnVrL21tejQyODEvMjQyNS9JMS5jc3YiLAogICAgImh0dHBzOi8vd3d3LmZvb3RiYWxsLWRhdGEuY28udWsvbW16NDI4MS8yNTI2L0YxLmNzdiIsICAgIyBMaWd1ZSAxCiAgICAiaHR0cHM6Ly93d3cuZm9vdGJhbGwtZGF0YS5jby51ay9tbXo0MjgxLzI0MjUvRjEuY3N2IiwKICAgICJodHRwczovL3d3dy5mb290YmFsbC1kYXRhLmNvLnVrL21tejQyODEvMjUyNi9EMS5jc3YiLCAgICMgQnVuZGVzbGlnYSAxCiAgICAiaHR0cHM6Ly93d3cuZm9vdGJhbGwtZGF0YS5jby51ay9tbXo0MjgxLzI0MjUvRDEuY3N2IiwKICAgICJodHRwczovL3d3dy5mb290YmFsbC1kYXRhLmNvLnVrL21tejQyODEvMjUyNi9EMi5jc3YiLCAgICMgQnVuZGVzbGlnYSAyCiAgICAiaHR0cHM6Ly93d3cuZm9vdGJhbGwtZGF0YS5jby51ay9tbXo0MjgxLzI0MjUvRDIuY3N2IiwKXQoKCiMg4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQCiMgQ1JFREVOVElBTFMKIyDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZAKCmRlZiBsb2FkX2NyZWRzKCkgLT4gZGljdDoKICAgIGNyZWRzID0ge30KICAgIHRyeToKICAgICAgICB3aXRoIG9wZW4oQ1JFRFNfRklMRSkgYXMgZjoKICAgICAgICAgICAgZm9yIGxpbmUgaW4gZjoKICAgICAgICAgICAgICAgIGxpbmUgPSBsaW5lLnN0cmlwKCkKICAgICAgICAgICAgICAgIGlmICI9IiBpbiBsaW5lIGFuZCBub3QgbGluZS5zdGFydHN3aXRoKCIjIik6CiAgICAgICAgICAgICAgICAgICAgazssdgAgPSBsaW5lLnNwbGl0KCI9IiwgMSkKICAgICAgICAgICAgICAgICAgICBjcmVkc1trLnN0cmlwKCldID0gdi5zdHJpcCgpCiAgICBleGNlcHQgRmlsZU5vdEZvdW5kRXJyb3I6CiAgICAgICAgcHJpbnQoZiJFUlJPUjogQ3JlZGVudGlhbHMtRGF0ZWkgbmljaHQgZ2VmdW5kZW46IHtDUkVEU19GSUxFfSIsIGZpbGU9c3lzLnN0ZGVycikKICAgIGV4Y2VwdCBFeGNlcHRpb24gYXMgZToKICAgICAgICBwcmludChmIkVSUk9SOiBDcmVkZW50aWFscyBsYWRlbiBmZWhsZ2VzY2hsYWdlbjoge2V9IiwgZmlsZT1zeXMuc3RkZXJyKQogICAgcmV0dXJuIGNyZWRzCgoKIyDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZAKIyBUSEUgT0REUyBBUEkKIyDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZDilZAKCk9ERFNfQVBJX0JBU0UgPSAiaHR0cHM6Ly9hcGkudGhlLW9kZHMtYXBpLmNvbS92NCIKZ
+#!/usr/bin/env python3
+"""
+Sports Betting Value Scanner
+────────────────────────────
+Analysiert Fußball (1./2./3. Bundesliga, Premier League) und UEFA-Wettbewerbe
+(Champions League, Europa League, Conference League) mit Poisson-Modell
+sowie Tennis (ATP) mit Elo-Modell.
+
+Datenquellen:
+  - Fußball-History: football-data.co.uk (Bundesliga + Top-5-Ligen)
+  - UEFA 1X2-Modell: Club-Elo (api.clubelo.com)
+  - Tennis-History:  Jeff Sackmann / tennis_atp (GitHub)
+  - Live-Odds:       The Odds API (v4)
+"""
+
+import sys
+import json
+import math
+import difflib
+import warnings
+import requests
+import numpy as np
+import pandas as pd
+from io import StringIO
+from datetime import datetime, timezone
+from pathlib import Path
+from scipy.stats import poisson
+from scipy.optimize import minimize
+
+warnings.filterwarnings("ignore")
+
+SCRIPT_DIR = Path(__file__).parent
+OUTPUT_DIR  = SCRIPT_DIR / "output"
+CREDS_FILE  = Path.home() / ".stock_scanner_credentials"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# KONFIGURATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+FOOTBALL_SPORTS = [
+    "soccer_germany_bundesliga",
+    "soccer_germany_bundesliga2",
+    "soccer_germany_liga3",
+    "soccer_epl",
+]
+
+SPORT_LABELS = {
+    "soccer_germany_bundesliga":       "1. Bundesliga",
+    "soccer_germany_bundesliga2":      "2. Bundesliga",
+    "soccer_germany_liga3":            "3. Liga",
+    "soccer_germany_dfb_pokal":        "DFB-Pokal",
+    "soccer_epl":                      "Premier League",
+}
+
+# football-data.co.uk URLs (D1/D2 = Standardformat)
+FDCO_URLS = {
+    "soccer_germany_bundesliga":  [
+        "https://www.football-data.co.uk/mmz4281/2526/D1.csv",
+        "https://www.football-data.co.uk/mmz4281/2425/D1.csv",
+    ],
+    "soccer_germany_bundesliga2": [
+        "https://www.football-data.co.uk/mmz4281/2526/D2.csv",
+        "https://www.football-data.co.uk/mmz4281/2425/D2.csv",
+    ],
+    "soccer_epl": [
+        "https://www.football-data.co.uk/mmz4281/2526/E0.csv",
+        "https://www.football-data.co.uk/mmz4281/2425/E0.csv",
+    ],
+    # 3. Liga kommt von OpenLigaDB (s. load_liga3_data)
+}
+
+# OpenLigaDB API für 3. Liga
+OPENLIGADB_BASE = "https://api.openligadb.de"
+
+# Schwellwerte Value Betting
+MIN_EDGE_PCT = 3.0    # Mindest-Edge in %
+MAX_EDGE_PCT = 100.0  # Max. Edge in % — höhere Werte deuten auf Datenfehler hin
+MIN_ODDS     = 1.25   # Mindest-Quoten
+MAX_KELLY    = 0.05   # Max. Kelly-Anteil (5 % des Bankrolls)
+
+# Tennis Elo-Einstellungen
+ELO_K_FACTOR  = 32
+ELO_INITIAL   = 1500
+ELO_YEARS     = list(range(datetime.now().year - 3, datetime.now().year + 1))
+
+# UEFA-Wettbewerbe
+UEFA_SPORTS = [
+    "soccer_uefa_champs_league",
+    "soccer_uefa_europa_league",
+    "soccer_uefa_europa_conference_league",
+]
+
+UEFA_LABELS = {
+    "soccer_uefa_champs_league":            "Champions League",
+    "soccer_uefa_europa_league":            "Europa League",
+    "soccer_uefa_europa_conference_league": "Conference League",
+}
+
+# Club-Elo API
+CLUBELO_URL = "http://api.clubelo.com/{date}"
+
+# Multi-Liga Poisson-Modell (Top-5-Ligen + Bundesliga 1+2)
+EUROPEAN_FDCO_URLS = [
+    "https://www.football-data.co.uk/mmz4281/2526/E0.csv",   # Premier League
+    "https://www.football-data.co.uk/mmz4281/2425/E0.csv",
+    "https://www.football-data.co.uk/mmz4281/2526/SP1.csv",  # La Liga
+    "https://www.football-data.co.uk/mmz4281/2425/SP1.csv",
+    "https://www.football-data.co.uk/mmz4281/2526/I1.csv",   # Serie A
+    "https://www.football-data.co.uk/mmz4281/2425/I1.csv",
+    "https://www.football-data.co.uk/mmz4281/2526/F1.csv",   # Ligue 1
+    "https://www.football-data.co.uk/mmz4281/2425/F1.csv",
+    "https://www.football-data.co.uk/mmz4281/2526/D1.csv",   # Bundesliga 1
+    "https://www.football-data.co.uk/mmz4281/2425/D1.csv",
+    "https://www.football-data.co.uk/mmz4281/2526/D2.csv",   # Bundesliga 2
+    "https://www.football-data.co.uk/mmz4281/2425/D2.csv",
+]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CREDENTIALS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def load_creds() -> dict:
+    creds = {}
+    try:
+        with open(CREDS_FILE) as f:
+            for line in f:
+                line = line.strip()
+                if "=" in line and not line.startswith("#"):
+                    k, v = line.split("=", 1)
+                    creds[k.strip()] = v.strip()
+    except FileNotFoundError:
+        print(f"ERROR: Credentials-Datei nicht gefunden: {CREDS_FILE}", file=sys.stderr)
+    except Exception as e:
+        print(f"ERROR: Credentials laden fehlgeschlagen: {e}", file=sys.stderr)
+    return creds
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# THE ODDS API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+ODDS_API_BASE = "https://api.the-odds-api.com/v4"
+
+
+def get_active_sports(api_key: str) -> list:
+    r = requests.get(f"{ODDS_API_BASE}/sports",
+                     params={"apiKey": api_key}, timeout=15)
+    r.raise_for_status()
+    return r.json()
+
+
+def get_odds(api_key: str, sport_key: str, markets: str = "h2h,totals") -> list:
+    params = {
+        "apiKey":     api_key,
+        "regions":    "eu",
+        "markets":    markets,
+        "oddsFormat": "decimal",
+        "dateFormat": "iso",
+    }
+    r = requests.get(f"{ODDS_API_BASE}/sports/{sport_key}/odds",
+                     params=params, timeout=20)
+    if r.status_code == 404:
+        return []
+    r.raise_for_status()
+    remaining = r.headers.get("x-requests-remaining", "?")
+    print(f"    → {len(r.json())} Matches | API-Requests verbleibend: {remaining}")
+    return r.json()
+
+
+def best_odds_from_match(match: dict) -> dict:
+    """Bestes Decimal-Odd pro Outcome (home, draw, away) aus allen Bookies."""
+    home = match["home_team"]
+    away = match["away_team"]
+    best = {"home": 1.0, "draw": 1.0, "away": 1.0}
+    for bm in match.get("bookmakers", []):
+        for market in bm.get("markets", []):
+            if market["key"] != "h2h":
+                continue
+            for o in market["outcomes"]:
+                price = float(o["price"])
+                if o["name"] == home:
+                    best["home"] = max(best["home"], price)
+                elif o["name"] == away:
+                    best["away"] = max(best["away"], price)
+                elif o["name"] == "Draw":
+                    best["draw"] = max(best["draw"], price)
+    return best
+
+
+def best_ou_odds_from_match(match: dict) -> list[dict]:
+    """
+    Extrahiert die besten Over/Under-Quoten pro Linie aus allen Bookies.
+    Gibt Liste von {line, over_odds, under_odds} zurück.
+    """
+    best: dict[float, dict] = {}  # line → {over: float, under: float}
+    for bm in match.get("bookmakers", []):
+        for market in bm.get("markets", []):
+            if market["key"] != "totals":
+                continue
+            for o in market["outcomes"]:
+                line  = float(o.get("point", 0))
+                price = float(o["price"])
+                side  = o["name"].lower()  # "over" or "under"
+                if line not in best:
+                    best[line] = {"over": 1.0, "under": 1.0}
+                best[line][side] = max(best[line][side], price)
+    result = []
+    for line, odds in sorted(best.items()):
+        if odds["over"] > 1.0 and odds["under"] > 1.0:
+            result.append({"line": line, "over_odds": odds["over"], "under_odds": odds["under"]})
+    return result
+
+
+def bookie_consensus(match: dict) -> dict:
+    """Konsenswahrscheinlichkeiten (normalisierter Schnitt über alle Bookies)."""
+    sums = {"home": [], "draw": [], "away": []}
+    home = match["home_team"]
+    away = match["away_team"]
+    for bm in match.get("bookmakers", []):
+        for market in bm.get("markets", []):
+            if market["key"] != "h2h":
+                continue
+            o_map = {}
+            for o in market["outcomes"]:
+                if o["name"] == home:
+                    o_map["home"] = 1 / float(o["price"])
+                elif o["name"] == away:
+                    o_map["away"] = 1 / float(o["price"])
+                elif o["name"] == "Draw":
+                    o_map["draw"] = 1 / float(o["price"])
+            total = sum(o_map.values())
+            if total > 0:
+                for k in sums:
+                    if k in o_map:
+                        sums[k].append(o_map[k] / total)
+    result = {}
+    for k, vals in sums.items():
+        result[k] = float(np.mean(vals)) if vals else None
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CLUB-ELO
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def download_clubelo(date: str) -> dict:
+    """
+    Lädt Club-Elo-Ratings für ein Datum (Format: YYYY-MM-DD).
+    Gibt {club_name: elo_rating} zurück.
+    """
+    url = CLUBELO_URL.format(date=date)
+    try:
+        r = requests.get(url, timeout=20)
+        r.raise_for_status()
+        df = pd.read_csv(StringIO(r.text))
+        result = {}
+        for _, row in df.iterrows():
+            club = row.get("Club")
+            elo  = row.get("Elo")
+            if pd.notna(club) and pd.notna(elo):
+                result[str(club).strip()] = float(elo)
+        return result
+    except Exception as e:
+        print(f"    Warning: Club-Elo ({date}): {e}")
+        return {}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FOOTBALL: DATEN LADEN
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def download_fdco(url: str) -> pd.DataFrame | None:
+    try:
+        r = requests.get(url, timeout=30)
+        r.raise_for_status()
+        df = pd.read_csv(StringIO(r.text), encoding="latin-1")
+        return df
+    except Exception as e:
+        print(f"    Warning: {url}: {e}")
+        return None
+
+
+def standardize_fdco(df: pd.DataFrame, is_new_format: bool = False) -> pd.DataFrame | None:
+    """Einheitliche Spalten: HomeTeam, AwayTeam, FTHG, FTAG (+ Date wenn vorhanden)."""
+    needed = ["HomeTeam", "AwayTeam", "FTHG", "FTAG"]
+    for col in needed:
+        if col not in df.columns:
+            print(f"    Warning: Spalte '{col}' fehlt")
+            return None
+    keep = needed + (["Date"] if "Date" in df.columns else [])
+    df = df[keep].copy()
+    df["FTHG"] = pd.to_numeric(df["FTHG"], errors="coerce")
+    df["FTAG"]  = pd.to_numeric(df["FTAG"],  errors="coerce")
+    df = df.dropna(subset=["HomeTeam", "AwayTeam", "FTHG", "FTAG"])
+    df["HomeTeam"] = df["HomeTeam"].str.strip()
+    df["AwayTeam"] = df["AwayTeam"].str.strip()
+    return df
+
+
+def load_liga3_data() -> pd.DataFrame | None:
+    """Lädt 3. Liga Matchdaten von OpenLigaDB (laufende + vergangene Saison)."""
+    frames = []
+    current_year = datetime.now().year
+    seasons = [current_year - 1, current_year - 2]  # z.B. 2025, 2024
+    for season in seasons:
+        url = f"{OPENLIGADB_BASE}/getmatchdata/bl3/{season}"
+        try:
+            r = requests.get(url, timeout=30)
+            r.raise_for_status()
+            matches = r.json()
+        except Exception as e:
+            print(f"    Warning: OpenLigaDB Saison {season}: {e}")
+            continue
+
+        rows = []
+        for m in matches:
+            if not m.get("matchIsFinished"):
+                continue
+            results = m.get("matchResults", [])
+            if not results:
+                continue
+            # Endstand: resultTypeID=2 oder letzter Eintrag
+            final = [r for r in results if r.get("resultTypeID") == 2]
+            if not final:
+                final = results
+            r_data = final[-1]
+            home = m["team1"]["teamName"].strip() if m.get("team1") else None
+            away = m["team2"]["teamName"].strip() if m.get("team2") else None
+            if home and away:
+                rows.append({
+                    "HomeTeam": home,
+                    "AwayTeam": away,
+                    "FTHG":     float(r_data["pointsTeam1"]),
+                    "FTAG":     float(r_data["pointsTeam2"]),
+                    "Date":     (m.get("matchDateTime") or "")[:10],
+                })
+        if rows:
+            frames.append(pd.DataFrame(rows))
+            print(f"    OpenLigaDB Saison {season}: {len(rows)} Matches")
+
+    if not frames:
+        return None
+    combined = pd.concat(frames, ignore_index=True)
+    dedup_cols = ["HomeTeam", "AwayTeam", "Date"] if "Date" in combined.columns else ["HomeTeam", "AwayTeam", "FTHG", "FTAG"]
+    return combined.drop_duplicates(subset=dedup_cols)
+
+
+def load_football_data(sport_key: str) -> pd.DataFrame | None:
+    if sport_key == "soccer_germany_liga3":
+        return load_liga3_data()
+
+    urls = FDCO_URLS.get(sport_key, [])
+    frames = []
+    for url in urls:
+        df_raw = download_fdco(url)
+        if df_raw is not None:
+            df = standardize_fdco(df_raw, is_new_format=False)
+            if df is not None and len(df) > 5:
+                frames.append(df)
+    if not frames:
+        return None
+    combined = pd.concat(frames, ignore_index=True)
+    dedup_cols = ["HomeTeam", "AwayTeam", "Date"] if "Date" in combined.columns else ["HomeTeam", "AwayTeam", "FTHG", "FTAG"]
+    return combined.drop_duplicates(subset=dedup_cols)
+
+
+def load_european_data() -> pd.DataFrame | None:
+    """
+    Lädt Matchdaten aus Top-5-Ligen + Bundesliga 1+2 für das europäische
+    Poisson-Modell (O/U bei UEFA-Wettbewerben).
+    """
+    frames = []
+    for url in EUROPEAN_FDCO_URLS:
+        df_raw = download_fdco(url)
+        if df_raw is not None:
+            df = standardize_fdco(df_raw)
+            if df is not None and len(df) > 5:
+                frames.append(df)
+    if not frames:
+        return None
+    combined = pd.concat(frames, ignore_index=True)
+    dedup_cols = ["HomeTeam", "AwayTeam", "Date"] if "Date" in combined.columns else ["HomeTeam", "AwayTeam", "FTHG", "FTAG"]
+    return combined.drop_duplicates(subset=dedup_cols)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FOOTBALL: POISSON-MODELL (Dixon-Coles-Stil)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def fit_poisson_model(df: pd.DataFrame) -> dict:
+    """
+    Passt Attack/Defense-Parameter per Maximum-Likelihood an.
+    log(λ_heim) = home_adv + attack[heim] – defense[gast]
+    log(λ_gast) = attack[gast]            – defense[heim]
+    """
+    teams    = sorted(set(df["HomeTeam"]) | set(df["AwayTeam"]))
+    n_teams  = len(teams)
+    idx      = {t: i for i, t in enumerate(teams)}
+
+    ht = df["HomeTeam"].map(idx).values
+    at = df["AwayTeam"].map(idx).values
+    hg = df["FTHG"].values.astype(float)
+    ag = df["FTAG"].values.astype(float)
+
+    n_params = 2 * n_teams + 1
+    x0       = np.zeros(n_params)
+    x0[-1]   = 0.25  # Home-Vorteil
+
+    def neg_ll(x):
+        att = x[:n_teams]
+        dfs = x[n_teams:2*n_teams]
+        ha  = x[-1]
+        lh  = np.exp(ha  + att[ht] - dfs[at])
+        la  = np.exp(att[at] - dfs[ht])
+        ll  = (hg * np.log(lh + 1e-10) - lh
+             + ag * np.log(la + 1e-10) - la)
+        return -np.sum(ll)
+
+    constraints = [{"type": "eq", "fun": lambda x: x[0]}]
+    res = minimize(neg_ll, x0, method="SLSQP",
+                   constraints=constraints,
+                   options={"maxiter": 2000, "ftol": 1e-9})
+
+    x   = res.x
+    return {
+        "attack":   {t: x[i]           for t, i in idx.items()},
+        "defense":  {t: x[n_teams + i] for t, i in idx.items()},
+        "home_adv": float(x[-1]),
+        "teams":    teams,
+    }
+
+
+def predict_football(home: str, away: str, model: dict, max_goals: int = 8):
+    """Liefert P(Heim-Sieg), P(Unentschieden), P(Auswärtssieg) via Poisson."""
+    attack  = model["attack"]
+    defense = model["defense"]
+    ha      = model["home_adv"]
+    if home not in attack or away not in attack:
+        return None
+    lh = math.exp(ha  + attack[home] - defense[away])
+    la = math.exp(attack[away] - defense[home])
+    hp = [poisson.pmf(g, lh) for g in range(max_goals + 1)]
+    ap = [poisson.pmf(g, la) for g in range(max_goals + 1)]
+    p_h = p_d = p_a = 0.0
+    for hg in range(max_goals + 1):
+        for ag in range(max_goals + 1):
+            p = hp[hg] * ap[ag]
+            if   hg > ag: p_h += p
+            elif hg == ag: p_d += p
+            else:          p_a += p
+    total = p_h + p_d + p_a
+    return {
+        "home": p_h / total,
+        "draw": p_d / total,
+        "away": p_a / total,
+        "lam_home": lh,
+        "lam_away": la,
+    }
+
+
+def predict_ou(lam_home: float, lam_away: float, line: float) -> tuple[float, float]:
+    """
+    Berechnet P(Über line) und P(Unter line) via Poisson.
+    Korrekt für .5-Linien (2.5, 3.5) und ganzzahlige Linien (2.0, 3.0).
+    Gibt (p_over, p_under) zurück, die sich zu 1.0 summieren.
+    """
+    lam_total = lam_home + lam_away
+    p_under = float(poisson.cdf(math.floor(line - 1e-9), lam_total))
+    p_over  = 1.0 - p_under
+    return p_over, p_under
+
+
+def elo_to_football_1x2(elo_home: float, elo_away: float,
+                         home_adv: float = 65.0) -> tuple[float, float, float]:
+    """
+    Konvertiert Club-Elo-Ratings in 1X2-Wahrscheinlichkeiten für Fußball.
+    home_adv: Heimvorteil in Elo-Punkten (Standard: 65 für UEFA-Heimspiele).
+    Gibt (p_home, p_draw, p_away) zurück.
+    """
+    dr      = elo_home + home_adv - elo_away
+    e_home  = 1.0 / (1.0 + 10.0 ** (-dr / 400.0))
+    # Unentschieden: max ~28% bei ausgeglichenem Spiel, sinkt bei Favoriten
+    p_draw  = 0.28 * math.exp(-2.0 * (e_home - 0.5) ** 2)
+    remaining = 1.0 - p_draw
+    p_home  = e_home * remaining
+    p_away  = (1.0 - e_home) * remaining
+    return p_home, p_draw, p_away
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FOOTBALL: TEAM-NAMEN-MATCHING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def normalize_name(name: str) -> str:
+    """Vereinheitlicht Sonderzeichen und Füllwörter."""
+    replacements = {
+        "ä": "a", "ö": "o", "ü": "u", "ß": "ss",
+        "Ä": "A", "Ö": "O", "Ü": "U",
+    }
+    for src, tgt in replacements.items():
+        name = name.replace(src, tgt)
+    for prefix in ["FC ", "SC ", "SV ", "VfL ", "VfB ", "TSG ", "SSV ", "FSV ",
+                   "1. FC ", "1. FSV ", "SpVgg ", "SG ", "BV ", "BSC "]:
+        if name.startswith(prefix):
+            name = name[len(prefix):]
+    return name.strip().lower()
+
+
+def find_team_in_model(api_name: str, model_teams: list) -> str | None:
+    """Findet den passenden Modell-Teamnamen zum API-Teamnamen."""
+    # 1) Exakt
+    if api_name in model_teams:
+        return api_name
+    # 2) Normalisiert exakt
+    norm_api = normalize_name(api_name)
+    for t in model_teams:
+        if normalize_name(t) == norm_api:
+            return t
+    # 3) Teilstring
+    for t in model_teams:
+        nt = normalize_name(t)
+        if norm_api in nt or nt in norm_api:
+            return t
+    # 4) Difflib-Fuzzy
+    close = difflib.get_close_matches(norm_api,
+                                       [normalize_name(t) for t in model_teams],
+                                       n=1, cutoff=0.6)
+    if close:
+        norm_match = close[0]
+        for t in model_teams:
+            if normalize_name(t) == norm_match:
+                return t
+    return None
+
+
+def find_club_elo(name: str, elo_dict: dict) -> float | None:
+    """Findet Club-Elo-Rating via fuzzy Matching (analog find_team_in_model)."""
+    if name in elo_dict:
+        return elo_dict[name]
+    norm = normalize_name(name)
+    for club, elo in elo_dict.items():
+        if normalize_name(club) == norm:
+            return elo
+    for club, elo in elo_dict.items():
+        nc = normalize_name(club)
+        if norm in nc or nc in norm:
+            return elo
+    close = difflib.get_close_matches(norm,
+                                       [normalize_name(c) for c in elo_dict],
+                                       n=1, cutoff=0.6)
+    if close:
+        for club, elo in elo_dict.items():
+            if normalize_name(club) == close[0]:
+                return elo
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TENNIS: ELO-MODELL (Jeff Sackmann ATP-Daten)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+ATP_BASE = "https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master"
+
+
+def download_atp_year(year: int) -> pd.DataFrame | None:
+    url = f"{ATP_BASE}/atp_matches_{year}.csv"
+    try:
+        r = requests.get(url, timeout=30)
+        r.raise_for_status()
+        df = pd.read_csv(StringIO(r.text), low_memory=False)
+        return df
+    except Exception as e:
+        print(f"    Warning: ATP {year}: {e}")
+        return None
+
+
+def compute_tennis_elo(years: list) -> dict:
+    """
+    Berechnet Elo-Ratings aus historischen ATP-Matches.
+    Gibt dict name→elo zurück.
+    """
+    elo = {}
+    all_frames = []
+    for year in years:
+        df = download_atp_year(year)
+        if df is not None and "winner_name" in df.columns:
+            all_frames.append(df)
+    if not all_frames:
+        print("    Warning: Keine ATP-Daten geladen")
+        return {}
+
+    combined = pd.concat(all_frames, ignore_index=True)
+    combined = combined.dropna(subset=["winner_name", "loser_name"])
+    # Chronologisch sortieren
+    if "tourney_date" in combined.columns:
+        combined["tourney_date"] = pd.to_numeric(combined["tourney_date"], errors="coerce")
+        combined = combined.sort_values("tourney_date")
+
+    def expected(ra, rb):
+        return 1 / (1 + 10 ** ((rb - ra) / 400))
+
+    for _, row in combined.iterrows():
+        w = str(row["winner_name"]).strip()
+        l = str(row["loser_name"]).strip()
+        if not w or not l:
+            continue
+        elo.setdefault(w, ELO_INITIAL)
+        elo.setdefault(l, ELO_INITIAL)
+        e_w = expected(elo[w], elo[l])
+        e_l = 1 - e_w
+        elo[w] += ELO_K_FACTOR * (1 - e_w)
+        elo[l] += ELO_K_FACTOR * (0 - e_l)
+
+    return elo
+
+
+def predict_tennis_win_prob(elo_a: float, elo_b: float) -> float:
+    """P(Spieler A schlägt Spieler B)."""
+    return 1 / (1 + 10 ** ((elo_b - elo_a) / 400))
+
+
+def find_player_elo(name: str, elo_dict: dict) -> float | None:
+    """Findet Elo-Rating eines Spielers (fuzzy)."""
+    if name in elo_dict:
+        return elo_dict[name]
+    # Teilstring-Match
+    name_lower = name.lower()
+    for player, rating in elo_dict.items():
+        if name_lower in player.lower() or player.lower() in name_lower:
+            return rating
+    # Difflib
+    close = difflib.get_close_matches(name, list(elo_dict.keys()), n=1, cutoff=0.7)
+    if close:
+        return elo_dict[close[0]]
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# VALUE BETTING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def compute_value(model_prob: float, odds: float) -> tuple[float, float]:
+    """
+    Edge  = model_prob × odds – 1
+    Kelly = edge / (odds – 1)
+    """
+    if odds <= 1.0 or model_prob <= 0:
+        return 0.0, 0.0
+    edge  = model_prob * odds - 1.0
+    kelly = edge / (odds - 1.0)
+    return edge, kelly
+
+
+def format_dt(iso_str: str) -> str:
+    try:
+        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        return dt.strftime("%d.%m. %H:%M")
+    except Exception:
+        return iso_str[:16]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FOOTBALL ANALYSE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def analyze_football_match(match: dict, model: dict) -> list:
+    home_api = match["home_team"]
+    away_api = match["away_team"]
+    model_teams = model["teams"]
+
+    home_model = find_team_in_model(home_api, model_teams)
+    away_model = find_team_in_model(away_api, model_teams)
+
+    if not home_model or not away_model:
+        return []
+
+    probs = predict_football(home_model, away_model, model)
+    if not probs:
+        return []
+
+    best   = best_odds_from_match(match)
+    bets   = []
+    labels = {"home": home_api, "draw": "Unentschieden", "away": away_api}
+
+    for outcome in ("home", "draw", "away"):
+        odds     = best[outcome]
+        model_p  = probs[outcome]
+        if odds < MIN_ODDS:
+            continue
+        edge, kelly = compute_value(model_p, odds)
+        if MIN_EDGE_PCT / 100 <= edge <= MAX_EDGE_PCT / 100:
+            bets.append({
+                "type":       "football",
+                "sport":      match.get("sport_key", ""),
+                "match":      f"{home_api} – {away_api}",
+                "tip":        labels[outcome],
+                "kick_off":   match["commence_time"],
+                "model_prob": model_p,
+                "best_odds":  odds,
+                "edge_pct":   edge * 100,
+                "kelly_pct":  min(kelly, MAX_KELLY) * 100,
+                "lam_home":   probs["lam_home"],
+                "lam_away":   probs["lam_away"],
+                "home_model": home_model,
+                "away_model": away_model,
+            })
+    return bets
+
+
+def analyze_football_ou(match: dict, model: dict) -> list:
+    """Value Bets für Über/Unter-Märkte via Poisson-Modell."""
+    home_api = match["home_team"]
+    away_api = match["away_team"]
+    model_teams = model["teams"]
+
+    home_model = find_team_in_model(home_api, model_teams)
+    away_model = find_team_in_model(away_api, model_teams)
+    if not home_model or not away_model:
+        return []
+
+    probs = predict_football(home_model, away_model, model)
+    if not probs:
+        return []
+
+    lam_home = probs["lam_home"]
+    lam_away = probs["lam_away"]
+    ou_lines  = best_ou_odds_from_match(match)
+    bets      = []
+
+    for entry in ou_lines:
+        line       = entry["line"]
+        if abs(line - round(line)) < 1e-9:
+            continue  # ganzzahlige Linien: Push-Fall nicht modelliert
+        p_over, p_under = predict_ou(lam_home, lam_away, line)
+
+        for side, model_p, odds in [
+            ("Über",  p_over,  entry["over_odds"]),
+            ("Unter", p_under, entry["under_odds"]),
+        ]:
+            if odds < MIN_ODDS:
+                continue
+            edge, kelly = compute_value(model_p, odds)
+            if MIN_EDGE_PCT / 100 <= edge <= MAX_EDGE_PCT / 100:
+                bets.append({
+                    "type":       "football_ou",
+                    "sport":      match.get("sport_key", ""),
+                    "match":      f"{home_api} – {away_api}",
+                    "line":       line,
+                    "tip":        f"{side} {line}",
+                    "kick_off":   match["commence_time"],
+                    "model_prob": model_p,
+                    "best_odds":  odds,
+                    "edge_pct":   edge * 100,
+                    "kelly_pct":  min(kelly, MAX_KELLY) * 100,
+                    "lam_home":   lam_home,
+                    "lam_away":   lam_away,
+                })
+    return bets
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# UEFA ANALYSE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def analyze_uefa_match(match: dict, elo_dict: dict,
+                       euro_model: dict | None) -> list:
+    """
+    Value Bets für UEFA-Matches:
+    - 1X2 via Club-Elo (elo_to_football_1x2)
+    - O/U  via Multi-Liga Poisson-Modell (euro_model)
+    """
+    home_api = match["home_team"]
+    away_api = match["away_team"]
+    best     = best_odds_from_match(match)
+    bets     = []
+
+    # ── 1X2 via Club-Elo ────────────────────────────────────────────────────
+    elo_home = find_club_elo(home_api, elo_dict)
+    elo_away = find_club_elo(away_api, elo_dict)
+
+    if elo_home is not None and elo_away is not None:
+        p_home, p_draw, p_away = elo_to_football_1x2(elo_home, elo_away)
+        labels = {"home": home_api, "draw": "Unentschieden", "away": away_api}
+        probs  = {"home": p_home,   "draw": p_draw,          "away": p_away}
+
+        for outcome in ("home", "draw", "away"):
+            odds    = best[outcome]
+            model_p = probs[outcome]
+            if odds < MIN_ODDS:
+                continue
+            edge, kelly = compute_value(model_p, odds)
+            if MIN_EDGE_PCT / 100 <= edge <= MAX_EDGE_PCT / 100:
+                bets.append({
+                    "bet_type":   "1x2",
+                    "sport":      match.get("sport_key", ""),
+                    "match":      f"{home_api} – {away_api}",
+                    "tip":        labels[outcome],
+                    "kick_off":   match["commence_time"],
+                    "model_prob": model_p,
+                    "best_odds":  odds,
+                    "edge_pct":   edge * 100,
+                    "kelly_pct":  min(kelly, MAX_KELLY) * 100,
+                    "model_src":  f"Club-Elo ({int(elo_home)}/{int(elo_away)})",
+                })
+
+    # ── O/U via Poisson ─────────────────────────────────────────────────────
+    if euro_model:
+        home_model = find_team_in_model(home_api, euro_model["teams"])
+        away_model = find_team_in_model(away_api, euro_model["teams"])
+
+        if home_model and away_model:
+            probs_eu = predict_football(home_model, away_model, euro_model)
+            if probs_eu:
+                lam_home = probs_eu["lam_home"]
+                lam_away = probs_eu["lam_away"]
+                ou_lines = best_ou_odds_from_match(match)
+
+                for entry in ou_lines:
+                    line = entry["line"]
+                    if abs(line - round(line)) < 1e-9:
+                        continue  # ganzzahlige Linien: Push nicht modelliert
+                    p_over, p_under = predict_ou(lam_home, lam_away, line)
+
+                    for side, model_p, odds in [
+                        ("Über",  p_over,  entry["over_odds"]),
+                        ("Unter", p_under, entry["under_odds"]),
+                    ]:
+                        if odds < MIN_ODDS:
+                            continue
+                        edge, kelly = compute_value(model_p, odds)
+                        if MIN_EDGE_PCT / 100 <= edge <= MAX_EDGE_PCT / 100:
+                            bets.append({
+                                "bet_type":   "ou",
+                                "sport":      match.get("sport_key", ""),
+                                "match":      f"{home_api} – {away_api}",
+                                "tip":        f"{side} {line}",
+                                "kick_off":   match["commence_time"],
+                                "model_prob": model_p,
+                                "best_odds":  odds,
+                                "edge_pct":   edge * 100,
+                                "kelly_pct":  min(kelly, MAX_KELLY) * 100,
+                                "model_src":  "Poisson",
+                                "lam_home":   lam_home,
+                                "lam_away":   lam_away,
+                            })
+    return bets
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TENNIS ANALYSE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def analyze_tennis_match(match: dict, tournament: str, elo_dict: dict) -> list:
+    p1 = match["home_team"]
+    p2 = match["away_team"]
+
+    elo1 = find_player_elo(p1, elo_dict)
+    elo2 = find_player_elo(p2, elo_dict)
+
+    best = best_odds_from_match(match)
+    bets = []
+
+    if elo1 is not None and elo2 is not None:
+        # Elo-basiertes Modell
+        prob1 = predict_tennis_win_prob(elo1, elo2)
+        prob2 = 1 - prob1
+        model_source = "Elo"
+    else:
+        # Fallback: Konsens der Bookies als Modell
+        consensus = bookie_consensus(match)
+        prob1 = consensus.get("home")
+        prob2 = consensus.get("away")
+        if not prob1 or not prob2:
+            return []
+        model_source = "Konsens"
+        elo1 = elo2 = None
+
+    for player, model_p, odds, elo_val in [
+        (p1, prob1, best["home"], elo1),
+        (p2, prob2, best["away"], elo2),
+    ]:
+        if odds < MIN_ODDS or not model_p:
+            continue
+        edge, kelly = compute_value(model_p, odds)
+        if MIN_EDGE_PCT / 100 <= edge <= MAX_EDGE_PCT / 100:
+            bets.append({
+                "type":         "tennis",
+                "sport":        match.get("sport_key", ""),
+                "tournament":   tournament,
+                "match":        f"{p1} – {p2}",
+                "tip":          player,
+                "kick_off":     match["commence_time"],
+                "model_prob":   model_p,
+                "best_odds":    odds,
+                "edge_pct":     edge * 100,
+                "kelly_pct":    min(kelly, MAX_KELLY) * 100,
+                "elo":          round(elo_val) if elo_val else None,
+                "model_source": model_source,
+            })
+    return bets
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# HTML-REPORT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+CSS = """
+body { font-family:'Segoe UI',Arial,sans-serif; background:#ffffff; color:#1a1a2e; margin:0; padding:20px; }
+h1   { color:#1a56a0; border-bottom:2px solid #dde3ed; padding-bottom:10px; font-size:1.6em; }
+h2   { color:#c05a00; margin-top:32px; font-size:1.15em; }
+.summary { display:flex; gap:16px; flex-wrap:wrap; margin:18px 0 24px; }
+.card { background:#f0f5ff; border:1px solid #c8d8f0; border-radius:8px;
+        padding:14px 22px; min-width:130px; }
+.card .val { font-size:1.9em; font-weight:700; color:#1a56a0; }
+.card .lbl { color:#555577; font-size:0.8em; margin-top:2px; }
+table { width:100%; border-collapse:collapse; background:#ffffff;
+        border:1px solid #dde3ed; border-radius:8px; overflow:hidden; margin:14px 0; }
+th  { background:#eef2fa; padding:9px 12px; text-align:left;
+      color:#444466; font-size:0.82em; border-bottom:1px solid #dde3ed; }
+td  { padding:8px 12px; border-bottom:1px solid #eef2fa; font-size:0.88em; color:#1a1a2e; }
+tr:last-child td { border-bottom:none; }
+tr:hover td { background:#f5f8ff; }
+.g  { color:#1a7a30; font-weight:700; }
+.y  { color:#a06000; font-weight:700; }
+.o  { color:#b54000; font-weight:700; }
+.tag{ background:#1a56a0; color:#fff; border-radius:4px;
+      padding:2px 7px; font-size:0.75em; }
+.tag2{ background:#e0ebff; color:#1a56a0; border:1px solid #b0ccee;
+       border-radius:4px; padding:2px 7px; font-size:0.75em; }
+.empty{ color:#777799; padding:18px; text-align:center;
+        background:#f7f9ff; border:1px solid #dde3ed; border-radius:8px; }
+.note { background:#fff8e8; border-left:3px solid #e09000; padding:10px 14px;
+        color:#664400; font-size:0.82em; border-radius:0 6px 6px 0; margin:10px 0; }
+.tag3{ background:#5c2d91; color:#fff; border-radius:4px;
+       padding:2px 7px; font-size:0.75em; }
+.footer{ color:#777799; font-size:0.78em; margin-top:30px;
+         border-top:1px solid #dde3ed; padding-top:14px; }
+"""
+
+def edge_class(e: float) -> str:
+    if e >= 10: return "g"
+    if e >= 5:  return "o"
+    return "y"
+
+
+def build_football_table(bets: list) -> str:
+    if not bets:
+        return '<div class="empty">Keine Football-Value-Bets gefunden – Modell benötigt ausreichend historische Matches für alle Teams.</div>'
+    headers = ["Liga", "Spiel", "Tipp", "Anstoß", "Modell-%", "Beste Quote", "Edge-%", "Kelly-%", "λ Heim", "λ Gast"]
+    rows = ""
+    for b in sorted(bets, key=lambda x: (x["kick_off"], -x["edge_pct"])):
+        tag   = SPORT_LABELS.get(b["sport"], b["sport"])
+        ec    = edge_class(b["edge_pct"])
+        rows += f"""<tr>
+          <td><span class="tag">{tag}</span></td>
+          <td><strong>{b['match']}</strong></td>
+          <td>{b['tip']}</td>
+          <td>{format_dt(b['kick_off'])}</td>
+          <td>{b['model_prob']*100:.1f}%</td>
+          <td>{b['best_odds']:.2f}</td>
+          <td class="{ec}">{b['edge_pct']:.1f}%</td>
+          <td style="color:#58a6ff">{b['kelly_pct']:.1f}%</td>
+          <td style="color:#8b949e">{b['lam_home']:.2f}</td>
+          <td style="color:#8b949e">{b['lam_away']:.2f}</td>
+        </tr>"""
+    ths = "".join(f"<th>{h}</th>" for h in headers)
+    return f"<table><tr>{ths}</tr>{rows}</table>"
+
+
+def build_ou_table(bets: list) -> str:
+    if not bets:
+        return '<div class="empty">Keine Über/Unter Value Bets gefunden.</div>'
+    headers = ["Liga", "Spiel", "Tipp", "Anstoß", "Modell-%", "Beste Quote", "Edge-%", "Kelly-%", "λ Heim", "λ Gast"]
+    rows = ""
+    for b in sorted(bets, key=lambda x: (x["kick_off"], -x["edge_pct"])):
+        tag = SPORT_LABELS.get(b["sport"], b["sport"])
+        ec  = edge_class(b["edge_pct"])
+        rows += f"""<tr>
+          <td><span class="tag">{tag}</span></td>
+          <td><strong>{b['match']}</strong></td>
+          <td>{b['tip']}</td>
+          <td>{format_dt(b['kick_off'])}</td>
+          <td>{b['model_prob']*100:.1f}%</td>
+          <td>{b['best_odds']:.2f}</td>
+          <td class="{ec}">{b['edge_pct']:.1f}%</td>
+          <td style="color:#58a6ff">{b['kelly_pct']:.1f}%</td>
+          <td style="color:#8b949e">{b['lam_home']:.2f}</td>
+          <td style="color:#8b949e">{b['lam_away']:.2f}</td>
+        </tr>"""
+    ths = "".join(f"<th>{h}</th>" for h in headers)
+    return f"<table><tr>{ths}</tr>{rows}</table>"
+
+
+def build_uefa_table(bets: list) -> str:
+    if not bets:
+        return '<div class="empty">Keine UEFA Value Bets gefunden.</div>'
+    headers = ["Wettbewerb", "Spiel", "Typ", "Tipp", "Anstoß",
+               "Modell-%", "Beste Quote", "Edge-%", "Kelly-%", "Modell"]
+    rows = ""
+    for b in sorted(bets, key=lambda x: (x["kick_off"], -x["edge_pct"])):
+        tag = UEFA_LABELS.get(b["sport"], b["sport"])
+        ec  = edge_class(b["edge_pct"])
+        typ_label = "1X2" if b["bet_type"] == "1x2" else "O/U"
+        rows += f"""<tr>
+          <td><span class="tag3">{tag}</span></td>
+          <td><strong>{b['match']}</strong></td>
+          <td>{typ_label}</td>
+          <td>{b['tip']}</td>
+          <td>{format_dt(b['kick_off'])}</td>
+          <td>{b['model_prob']*100:.1f}%</td>
+          <td>{b['best_odds']:.2f}</td>
+          <td class="{ec}">{b['edge_pct']:.1f}%</td>
+          <td style="color:#58a6ff">{b['kelly_pct']:.1f}%</td>
+          <td style="color:#8b949e">{b['model_src']}</td>
+        </tr>"""
+    ths = "".join(f"<th>{h}</th>" for h in headers)
+    return f"<table><tr>{ths}</tr>{rows}</table>"
+
+
+def build_tennis_table(bets: list) -> str:
+    if not bets:
+        return '<div class="empty">Keine aktiven Tennis-Turniere mit ausreichend Odds gefunden.</div>'
+    headers = ["Turnier", "Spiel", "Tipp", "Zeitpunkt", "Modell-%", "Beste Quote", "Edge-%", "Kelly-%", "Elo", "Modell"]
+    rows = ""
+    for b in sorted(bets, key=lambda x: (x["kick_off"], -x["edge_pct"])):
+        ec        = edge_class(b["edge_pct"])
+        elo       = str(b["elo"]) if b["elo"] else "–"
+        is_konsens = b.get("model_source") == "Konsens"
+        warn      = " ⚠️" if is_konsens else ""
+        row_style = ' style="opacity:0.65"' if is_konsens else ""
+        rows += f"""<tr{row_style}>
+          <td><span class="tag2">{b['tournament']}</span></td>
+          <td><strong>{b['match']}</strong></td>
+          <td>{b['tip']}{warn}</td>
+          <td>{format_dt(b['kick_off'])}</td>
+          <td>{b['model_prob']*100:.1f}%</td>
+          <td>{b['best_odds']:.2f}</td>
+          <td class="{ec}">{b['edge_pct']:.1f}%</td>
+          <td style="color:#58a6ff">{b['kelly_pct']:.1f}%</td>
+          <td style="color:#8b949e">{elo}</td>
+          <td style="color:#8b949e">{b['model_source']}{warn}</td>
+        </tr>"""
+    ths = "".join(f"<th>{h}</th>" for h in headers)
+    return f"<table><tr>{ths}</tr>{rows}</table>"
+
+
+def generate_html(football_bets: list, ou_bets: list,
+                  tennis_bets: list, uefa_bets: list) -> str:
+    date_str  = datetime.now().strftime("%d.%m.%Y")
+    timestamp = datetime.now().strftime("%d.%m.%Y %H:%M")
+    real_tennis_bets = [b for b in tennis_bets if b.get("model_source") != "Konsens"]
+    total     = len(football_bets) + len(ou_bets) + len(real_tennis_bets) + len(uefa_bets)
+    all_edges = [b["edge_pct"] for b in football_bets + ou_bets + tennis_bets + uefa_bets]
+    max_edge  = max(all_edges) if all_edges else 0.0
+
+    return f"""<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Sports Value Scanner {date_str}</title>
+<style>{CSS}</style>
+</head>
+<body>
+<h1>📊 Sports Value Scanner — {date_str}</h1>
+
+<div class="summary">
+  <div class="card"><div class="val">{total}</div><div class="lbl">Value Bets gesamt</div></div>
+  <div class="card"><div class="val">{len(football_bets)}</div><div class="lbl">⚽ Fußball 1X2</div></div>
+  <div class="card"><div class="val">{len(ou_bets)}</div><div class="lbl">⚽ Über/Unter</div></div>
+  <div class="card"><div class="val">{len(uefa_bets)}</div><div class="lbl">🏆 UEFA</div></div>
+  <div class="card"><div class="val">{len(real_tennis_bets)}</div><div class="lbl">🎾 Tennis</div></div>
+  <div class="card"><div class="val">{max_edge:.1f}%</div><div class="lbl">Max. Edge</div></div>
+</div>
+
+<div class="note">
+  📌 <strong>Hinweis:</strong> Edge = (Modell-Wahrscheinlichkeit × Beste Quote) – 1.
+  Nur Bets mit Edge ≥ {MIN_EDGE_PCT}% und ≤ {MAX_EDGE_PCT:.0f}% sowie Quote ≥ {MIN_ODDS} werden angezeigt.
+  Kelly-Empfehlung maximal {MAX_KELLY*100:.0f}% des Bankrolls.
+</div>
+
+<h2>⚽ Fußball Value Bets (Poisson-Modell)</h2>
+{build_football_table(football_bets)}
+
+<h2>⚽ Über/Unter Value Bets (Poisson-Modell)</h2>
+{build_ou_table(ou_bets)}
+
+<h2>🏆 UEFA Value Bets (Champions / Europa / Conference League)</h2>
+{build_uefa_table(uefa_bets)}
+
+<h2>🎾 Tennis Value Bets (Elo-Modell)</h2>
+{build_tennis_table(tennis_bets)}
+
+<div class="footer">
+  Generiert: {timestamp} &nbsp;|&nbsp;
+  Fußball-Modell: Poisson MLE (football-data.co.uk) &nbsp;|&nbsp;
+  Tennis-Modell: Elo (Jeff Sackmann ATP Data) &nbsp;|&nbsp;
+  Odds: The Odds API &nbsp;|&nbsp;
+  UEFA-Modell: Club-Elo + Poisson (football-data.co.uk)<br>
+  ⚠️ Diese Analyse dient ausschließlich zu Informationszwecken.
+  Sportwetten sind mit erheblichen Verlustrisiken verbunden.
+</div>
+</body>
+</html>"""
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MAIN
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def main() -> int:
+    print("=" * 60)
+    print(f"  Sports Value Scanner — {datetime.now().strftime('%d.%m.%Y %H:%M')}")
+    print("=" * 60)
+
+    creds = load_creds()
+    api_key = creds.get("ODDS_API_KEY", "")
+    if not api_key:
+        print("ERROR: ODDS_API_KEY fehlt in ~/.stock_scanner_credentials")
+        return 1
+
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    out_dir  = OUTPUT_DIR / date_str
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    all_football_bets: list = []
+    all_ou_bets:       list = []
+    all_tennis_bets:   list = []
+    all_uefa_bets:     list = []
+
+    # ── FUSSBALL ────────────────────────────────────────────────────────────
+    print("\n[⚽ Fußball] Daten laden & Modelle trainieren …")
+    football_models = {}
+
+    for sport_key in FOOTBALL_SPORTS:
+        label = SPORT_LABELS.get(sport_key, sport_key)
+        print(f"  {label}:")
+        df = load_football_data(sport_key)
+        if df is None or len(df) < 20:
+            print(f"    Nicht genug Daten ({len(df) if df is not None else 0} Matches) – übersprungen")
+            continue
+        n_teams = df["HomeTeam"].nunique()
+        print(f"    {len(df)} Matches, {n_teams} Teams → trainiere Poisson …")
+        try:
+            model = fit_poisson_model(df)
+            football_models[sport_key] = model
+            print(f"    OK. Home-Vorteil={model['home_adv']:.3f}")
+        except Exception as e:
+            print(f"    Modell-Fehler: {e}")
+
+    print("\n[⚽ Fußball] Upcoming Matches via Odds API …")
+    for sport_key in FOOTBALL_SPORTS:
+        label = SPORT_LABELS.get(sport_key, sport_key)
+        print(f"  {label}:")
+        try:
+            matches = get_odds(api_key, sport_key)
+        except Exception as e:
+            print(f"    Fehler: {e}")
+            continue
+
+        model = football_models.get(sport_key)
+        if model is None:
+            print(f"    Kein Modell – Odds werden ignoriert")
+            continue
+
+        for match in matches:
+            bets = analyze_football_match(match, model)
+            if bets:
+                all_football_bets.extend(bets)
+                for b in bets:
+                    print(f"    ✓ VALUE: {b['match']} → {b['tip']} "
+                          f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
+            ou_bets_match = analyze_football_ou(match, model)
+            if ou_bets_match:
+                all_ou_bets.extend(ou_bets_match)
+                for b in ou_bets_match:
+                    print(f"    ✓ O/U VALUE: {b['match']} → {b['tip']} "
+                          f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
+
+    # ── TENNIS ──────────────────────────────────────────────────────────────
+    print("\n[🎾 Tennis] Elo-Ratings berechnen …")
+    elo_dict = compute_tennis_elo(ELO_YEARS)
+    print(f"  {len(elo_dict)} Spieler im Elo-Dict")
+
+    print("\n[🎾 Tennis] Aktive Turniere suchen …")
+    try:
+        all_sports   = get_active_sports(api_key)
+        tennis_sports = [s for s in all_sports
+                         if s["key"].startswith("tennis_") and s["active"]]
+        print(f"  {len(tennis_sports)} aktive Tennis-Turniere:")
+        for s in tennis_sports:
+            print(f"    - {s['key']} ({s['title']})")
+    except Exception as e:
+        print(f"  Fehler: {e}")
+        tennis_sports = []
+
+    for sport in tennis_sports:
+        sport_key = sport["key"]
+        title     = sport["title"]
+        print(f"  {title}:")
+        try:
+            matches = get_odds(api_key, sport_key, markets="h2h")
+        except Exception as e:
+            print(f"    Fehler: {e}")
+            continue
+        for match in matches:
+            bets = analyze_tennis_match(match, title, elo_dict)
+            if bets:
+                all_tennis_bets.extend(bets)
+                for b in bets:
+                    print(f"    ✓ VALUE: {b['match']} → {b['tip']} "
+                          f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
+
+    # ── UEFA ────────────────────────────────────────────────────────────────
+    print("\n[🏆 UEFA] Club-Elo-Ratings laden …")
+    elo_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    club_elo_dict = download_clubelo(elo_date)
+    print(f"  {len(club_elo_dict)} Clubs im Elo-Dict")
+
+    print("\n[🏆 UEFA] Europäisches Poisson-Modell trainieren …")
+    euro_df = load_european_data()
+    euro_model = None
+    if euro_df is not None and len(euro_df) >= 20:
+        n_teams = euro_df["HomeTeam"].nunique()
+        print(f"  {len(euro_df)} Matches, {n_teams} Teams → trainiere Poisson …")
+        try:
+            euro_model = fit_poisson_model(euro_df)
+            print(f"  OK. Home-Vorteil={euro_model['home_adv']:.3f}")
+        except Exception as e:
+            print(f"  Modell-Fehler: {e}")
+    else:
+        print("  Nicht genug Daten für europäisches Modell")
+
+    print("\n[🏆 UEFA] Matches via Odds API …")
+    for sport_key in UEFA_SPORTS:
+        label = UEFA_LABELS.get(sport_key, sport_key)
+        print(f"  {label}:")
+        try:
+            matches = get_odds(api_key, sport_key)
+        except Exception as e:
+            print(f"    Fehler: {e}")
+            continue
+        for match in matches:
+            bets = analyze_uefa_match(match, club_elo_dict, euro_model)
+            if bets:
+                all_uefa_bets.extend(bets)
+                for b in bets:
+                    typ = b["bet_type"].upper()
+                    print(f"    ✓ UEFA VALUE [{typ}]: {b['match']} → {b['tip']} "
+                          f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
+
+    # ── REPORT ──────────────────────────────────────────────────────────────
+    print(f"\n[📊 Report] Football Bets: {len(all_football_bets)}")
+    print(f"[📊 Report] O/U Bets:      {len(all_ou_bets)}")
+    print(f"[📊 Report] Tennis Bets:   {len(all_tennis_bets)}")
+    print(f"[📊 Report] UEFA Bets:     {len(all_uefa_bets)}")
+
+    html      = generate_html(all_football_bets, all_ou_bets, all_tennis_bets, all_uefa_bets)
+    html_path = out_dir / "sports_signals.html"
+    html_path.write_text(html, encoding="utf-8")
+    print(f"[📊 Report] HTML: {html_path}")
+
+    # CSV
+    rows = []
+    for b in all_football_bets:
+        rows.append({
+            "Typ":        "Fußball",
+            "Liga":       SPORT_LABELS.get(b["sport"], b["sport"]),
+            "Spiel":      b["match"],
+            "Tipp":       b["tip"],
+            "Anstoß":     b["kick_off"],
+            "Modell-%":   f"{b['model_prob']*100:.1f}",
+            "BestOdds":   f"{b['best_odds']:.2f}",
+            "Edge-%":     f"{b['edge_pct']:.1f}",
+            "Kelly-%":    f"{b['kelly_pct']:.1f}",
+            "λ-Heim":     f"{b['lam_home']:.2f}",
+            "λ-Gast":     f"{b['lam_away']:.2f}",
+        })
+    for b in all_ou_bets:
+        rows.append({
+            "Typ":        "Fußball O/U",
+            "Liga":       SPORT_LABELS.get(b["sport"], b["sport"]),
+            "Spiel":      b["match"],
+            "Tipp":       b["tip"],
+            "Anstoß":     b["kick_off"],
+            "Modell-%":   f"{b['model_prob']*100:.1f}",
+            "BestOdds":   f"{b['best_odds']:.2f}",
+            "Edge-%":     f"{b['edge_pct']:.1f}",
+            "Kelly-%":    f"{b['kelly_pct']:.1f}",
+            "λ-Heim":     f"{b['lam_home']:.2f}",
+            "λ-Gast":     f"{b['lam_away']:.2f}",
+        })
+    for b in all_uefa_bets:
+        row = {
+            "Typ":        f"UEFA {b['bet_type'].upper()}",
+            "Liga":       UEFA_LABELS.get(b["sport"], b["sport"]),
+            "Spiel":      b["match"],
+            "Tipp":       b["tip"],
+            "Anstoß":     b["kick_off"],
+            "Modell-%":   f"{b['model_prob']*100:.1f}",
+            "BestOdds":   f"{b['best_odds']:.2f}",
+            "Edge-%":     f"{b['edge_pct']:.1f}",
+            "Kelly-%":    f"{b['kelly_pct']:.1f}",
+            "Modell":     b["model_src"],
+        }
+        if b["bet_type"] == "ou":
+            row["λ-Heim"] = f"{b.get('lam_home', 0):.2f}"
+            row["λ-Gast"] = f"{b.get('lam_away', 0):.2f}"
+        rows.append(row)
+    for b in all_tennis_bets:
+        rows.append({
+            "Typ":        "Tennis",
+            "Liga":       b["tournament"],
+            "Spiel":      b["match"],
+            "Tipp":       b["tip"],
+            "Anstoß":     b["kick_off"],
+            "Modell-%":   f"{b['model_prob']*100:.1f}",
+            "BestOdds":   f"{b['best_odds']:.2f}",
+            "Edge-%":     f"{b['edge_pct']:.1f}",
+            "Kelly-%":    f"{b['kelly_pct']:.1f}",
+            "Elo":        str(b["elo"]) if b["elo"] else "",
+        })
+
+    if rows:
+        csv_path = out_dir / "sports_signals.csv"
+        pd.DataFrame(rows).to_csv(csv_path, index=False)
+        print(f"[📊 Report] CSV:  {csv_path}")
+
+    print("\n✓ Fertig!")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
