@@ -17,6 +17,9 @@ from pathlib import Path
 def load_credentials() -> dict:
     cred_file = Path.home() / ".stock_scanner_credentials"
     creds = {}
+    if not cred_file.exists():
+        print(f"Fehler: Credentials-Datei fehlt: {cred_file}", file=sys.stderr)
+        return {}
     with open(cred_file) as f:
         for line in f:
             line = line.strip()
@@ -24,6 +27,14 @@ def load_credentials() -> dict:
                 k, v = line.split("=", 1)
                 creds[k.strip()] = v.strip()
     return creds
+
+
+def require_keys(creds: dict, keys: list[str]) -> bool:
+    missing = [k for k in keys if not creds.get(k)]
+    if missing:
+        print(f"Fehler: Fehlende Credentials: {', '.join(missing)}", file=sys.stderr)
+        return False
+    return True
 
 
 def build_subject(html_path: Path) -> str:
@@ -48,6 +59,8 @@ def build_subject(html_path: Path) -> str:
 
 def send_report(html_path: Path, csv_path: Path | None = None):
     creds     = load_credentials()
+    if not require_keys(creds, ["GMAIL_USER", "GMAIL_APP_PASSWORD", "GMAIL_RECIPIENT"]):
+        sys.exit(1)
     user      = creds["GMAIL_USER"]
     password  = creds["GMAIL_APP_PASSWORD"]
     recipient = creds["GMAIL_RECIPIENT"]
