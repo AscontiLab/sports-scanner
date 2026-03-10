@@ -8,12 +8,13 @@ der Spielergebnisse und Auswertung von ROI/Kalibrierung.
 DB: sports_backtesting.db (im Scanner-Verzeichnis)
 
 Verwendung in sports_scanner.py:
-    from backtesting import init_db, log_scan_run, log_prediction
+    from backtesting import init_db, log_scan_run, log_prediction, resolve_results
 
     init_db()
     run_id = log_scan_run(scanned_at, model_version="v1.0", elo_years=[2023,2024,2025,2026], training_matches=n)
     for bet in all_football_bets:
         log_prediction(run_id, bet, match_raw=match)
+    resolve_results()   # am Ende: offene Bets gegen Scores-API auflösen
 """
 
 import json
@@ -518,6 +519,132 @@ def update_result(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# ERGEBNISSE AUFLÖSEN
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _load_api_key() -> str:
+    """Liest ODDS_API_KEY aus ~/.stock_scanner_credentials (KEY=VALUE-Format)."""
+    creds_path = Path.home() / ".stock_scanner_credentials"
+    try:
+        for line in creds_path.read_text().splitlines():
+            line = line.strip()
+            if line.startswith("ODDS_API_KEY"):
+                parts = line.split("=", 1)
+                if len(parts) == 2:
+                    return parts[1].strip().strip('"').strip("'")
+    except Exception:
+        pass
+    return ""
+
+
+def resolve_results(api_key: str | None = None) -> dict:
+    """
+    Ruft The Odds API /scores auf und trägt Ergebnisse für offene Vorhersagen ein.
+
+    Ablauf:
+        1. get_open_predictions() → alle Bets ohne Ergebnis, deren Anpfiff bereits war
+        2. Gruppierung nach sport_key, dann odds_api_match_id
+        3. Pro sport_key: GET /v4/sports/{sport_key}/scores?daysFrom=3
+        4. Completed matches → update_result()
+        5. Ausgabe: "Resolved: X bets | Still open: Y bets"
+
+    Args:
+        api_key: The Odds API Key. Wird aus ~/.stock_scanner_credentials geladen
+                 wenn nicht übergeben.
+
+    Returns:
+        {"resolved": int, "still_open": int}
+    """
+    import urllib.request
+    from collections import defaultdict
+
+    if api_key is None:
+        api_key = _load_api_key()
+
+    if not api_key:
+        print("[Backtesting] resolve_results: kein ODDS_API_KEY – übersprungen")
+        return {"resolved": 0, "still_open": 0}
+
+    open_preds = get_open_predictions()
+    if not open_preds:
+        print("[Backtesting] Keine offenen Vorhersagen zum Auflösen.")
+        return {"resolved": 0, "still_open": 0}
+
+    print(f"[Backtesting] {len(open_preds)} offene Vorhersagen – löse Ergebnisse auf …")
+
+    # Gruppieren: sport_key → match_id → [predictions]
+    by_sport: dict[str, dict[str, list[dict]]] = defaultdict(lambda: defaultdict(list))
+    no_id_count = 0
+    for p in open_preds:
+        if p.get("odds_api_match_id"):
+            by_sport[p["sport_key"]][p["odds_api_match_id"]].append(p)
+        else:
+            no_id_count += 1
+
+    resolved   = 0
+    still_open = no_id_count  # Bets ohne Match-ID können nie automatisch aufgelöst werden
+
+    for sport_key, match_map in by_sport.items():
+        url = (
+            f"https://api.the-odds-api.com/v4/sports/{sport_key}/scores"
+            f"?apiKey={api_key}&daysFrom=3"
+        )
+        try:
+            with urllib.request.urlopen(url, timeout=15) as resp:
+                scores_data: list[dict] = json.loads(resp.read().decode())
+        except Exception as e:
+            print(f"[Backtesting] Scores-API Fehler ({sport_key}): {e} – übersprungen")
+            still_open += sum(len(v) for v in match_map.values())
+            continue
+
+        scores_by_id: dict[str, dict] = {s["id"]: s for s in scores_data}
+
+        for match_id, preds in match_map.items():
+            entry = scores_by_id.get(match_id)
+
+            if not entry or not entry.get("completed"):
+                still_open += len(preds)
+                continue
+
+            # Scores extrahieren
+            home_name = entry.get("home_team", "")
+            away_name = entry.get("away_team", "")
+            home_score: int | None = None
+            away_score: int | None = None
+            for s in (entry.get("scores") or []):
+                try:
+                    val = int(s["score"])
+                except (ValueError, KeyError, TypeError):
+                    continue
+                if s.get("name") == home_name:
+                    home_score = val
+                elif s.get("name") == away_name:
+                    away_score = val
+
+            if home_score is None or away_score is None:
+                still_open += len(preds)
+                continue
+
+            for p in preds:
+                try:
+                    result = update_result(p["id"], home_score, away_score)
+                    resolved += 1
+                    icon    = "✓" if result["bet_won"] == 1 else ("✗" if result["bet_won"] == 0 else "~")
+                    pnl     = result["pnl_units"]
+                    pnl_str = f"{pnl:+.2f}u" if pnl is not None else "n/a"
+                    print(
+                        f"[Backtesting] {icon} {p['home_team']} – {p['away_team']} "
+                        f"{home_score}:{away_score}  → {p['tip']}  PnL {pnl_str}"
+                    )
+                except Exception as e:
+                    print(f"[Backtesting] update_result Fehler (ID {p['id']}): {e}")
+                    still_open += 1
+
+    print(f"[Backtesting] Resolved: {resolved} bets | Still open: {still_open} bets")
+    return {"resolved": resolved, "still_open": still_open}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # AUSWERTUNG
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -653,7 +780,11 @@ if __name__ == "__main__":
             print(f"  {r['prob_bucket']:>7.0%}  {r['bets']:>5d}  "
                   f"{r['avg_model_prob']:>7.1%}  {r['actual_win_rate'] or 0:>10.1%}{flag}")
 
+    elif cmd == "resolve":
+        result = resolve_results()
+        print(f"Resolved: {result['resolved']} | Still open: {result['still_open']}")
+
     else:
         print(f"Unbekannter Befehl: {cmd}")
-        print("Verwendung: python3 backtesting.py [summary|open]")
+        print("Verwendung: python3 backtesting.py [summary|open|resolve]")
         sys.exit(1)
