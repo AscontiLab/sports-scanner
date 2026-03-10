@@ -14,6 +14,7 @@ Datenquellen:
 """
 
 import sys
+import argparse
 import json
 import math
 import difflib
@@ -22,10 +23,13 @@ import requests
 import numpy as np
 import pandas as pd
 from io import StringIO
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from scipy.stats import poisson
 from scipy.optimize import minimize
+from backtesting import init_db, log_scan_run, log_prediction, resolve_results
+
+import subprocess
 
 warnings.filterwarnings("ignore")
 
@@ -53,19 +57,10 @@ SPORT_LABELS = {
 }
 
 # football-data.co.uk URLs (D1/D2 = Standardformat)
-FDCO_URLS = {
-    "soccer_germany_bundesliga":  [
-        "https://www.football-data.co.uk/mmz4281/2526/D1.csv",
-        "https://www.football-data.co.uk/mmz4281/2425/D1.csv",
-    ],
-    "soccer_germany_bundesliga2": [
-        "https://www.football-data.co.uk/mmz4281/2526/D2.csv",
-        "https://www.football-data.co.uk/mmz4281/2425/D2.csv",
-    ],
-    "soccer_epl": [
-        "https://www.football-data.co.uk/mmz4281/2526/E0.csv",
-        "https://www.football-data.co.uk/mmz4281/2425/E0.csv",
-    ],
+FDCO_LEAGUES = {
+    "soccer_germany_bundesliga": "D1",
+    "soccer_germany_bundesliga2": "D2",
+    "soccer_england_premier_league": "E0",
     # 3. Liga kommt von OpenLigaDB (s. load_liga3_data)
 }
 
@@ -97,23 +92,53 @@ UEFA_LABELS = {
 }
 
 # Club-Elo API
-CLUBELO_URL = "http://api.clubelo.com/{date}"
+CLUBELO_URL_HTTPS = "https://api.clubelo.com/{date}"
+CLUBELO_URL_HTTP  = "http://api.clubelo.com/{date}"
 
 # Multi-Liga Poisson-Modell (Top-5-Ligen + Bundesliga 1+2)
-EUROPEAN_FDCO_URLS = [
-    "https://www.football-data.co.uk/mmz4281/2526/E0.csv",   # Premier League
-    "https://www.football-data.co.uk/mmz4281/2425/E0.csv",
-    "https://www.football-data.co.uk/mmz4281/2526/SP1.csv",  # La Liga
-    "https://www.football-data.co.uk/mmz4281/2425/SP1.csv",
-    "https://www.football-data.co.uk/mmz4281/2526/I1.csv",   # Serie A
-    "https://www.football-data.co.uk/mmz4281/2425/I1.csv",
-    "https://www.football-data.co.uk/mmz4281/2526/F1.csv",   # Ligue 1
-    "https://www.football-data.co.uk/mmz4281/2425/F1.csv",
-    "https://www.football-data.co.uk/mmz4281/2526/D1.csv",   # Bundesliga 1
-    "https://www.football-data.co.uk/mmz4281/2425/D1.csv",
-    "https://www.football-data.co.uk/mmz4281/2526/D2.csv",   # Bundesliga 2
-    "https://www.football-data.co.uk/mmz4281/2425/D2.csv",
+EUROPEAN_FDCO_LEAGUES = [
+    "E0",   # Premier League
+    "SP1",  # La Liga
+    "I1",   # Serie A
+    "F1",   # Ligue 1
+    "D1",   # Bundesliga 1
+    "D2",   # Bundesliga 2
 ]
+
+# Odds API Quota: bei sehr niedrigem Rest nicht weiterziehen
+MIN_ODDS_API_REMAINING = 5
+ODDS_API_REMAINING: int | None = None
+
+
+def current_season_codes(now: datetime | None = None) -> list[str]:
+    """
+    Liefert Saison-Codes wie ['2526','2425'] (aktuell + Vorjahr).
+    Annahme: Saison startet ab Juli.
+    """
+    if now is None:
+        now = datetime.now()
+    year = now.year
+    if now.month < 7:
+        start = year - 1
+    else:
+        start = year
+    codes = []
+    for s in [start, start - 1]:
+        codes.append(f"{str(s)[-2:]}{str(s+1)[-2:]}")
+    return codes
+
+
+def build_fdco_urls(league_code: str, season_codes: list[str]) -> list[str]:
+    return [
+        f"https://www.football-data.co.uk/mmz4281/{season}/{league_code}.csv"
+        for season in season_codes
+    ]
+
+
+def get_elo_years(now: datetime | None = None, span: int = 4) -> list[int]:
+    if now is None:
+        now = datetime.now()
+    return list(range(now.year - (span - 1), now.year + 1))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -121,6 +146,9 @@ EUROPEAN_FDCO_URLS = [
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def load_creds() -> dict:
+    if not CREDS_FILE.exists():
+        print(f"ERROR: Credentials-Datei fehlt: {CREDS_FILE}")
+        return {}
     creds = {}
     try:
         with open(CREDS_FILE) as f:
@@ -164,6 +192,12 @@ def get_odds(api_key: str, sport_key: str, markets: str = "h2h,totals") -> list:
         return []
     r.raise_for_status()
     remaining = r.headers.get("x-requests-remaining", "?")
+    try:
+        remaining_int = int(remaining)
+    except Exception:
+        remaining_int = None
+    global ODDS_API_REMAINING
+    ODDS_API_REMAINING = remaining_int
     print(f"    → {len(r.json())} Matches | API-Requests verbleibend: {remaining}")
     return r.json()
 
@@ -249,21 +283,38 @@ def download_clubelo(date: str) -> dict:
     Lädt Club-Elo-Ratings für ein Datum (Format: YYYY-MM-DD).
     Gibt {club_name: elo_rating} zurück.
     """
-    url = CLUBELO_URL.format(date=date)
-    try:
-        r = requests.get(url, timeout=20)
-        r.raise_for_status()
-        df = pd.read_csv(StringIO(r.text))
-        result = {}
-        for _, row in df.iterrows():
-            club = row.get("Club")
-            elo  = row.get("Elo")
-            if pd.notna(club) and pd.notna(elo):
-                result[str(club).strip()] = float(elo)
-        return result
-    except Exception as e:
-        print(f"    Warning: Club-Elo ({date}): {e}")
-        return {}
+    for url in [CLUBELO_URL_HTTPS.format(date=date), CLUBELO_URL_HTTP.format(date=date)]:
+        try:
+            r = requests.get(url, timeout=20)
+            r.raise_for_status()
+            df = pd.read_csv(StringIO(r.text))
+            result = {}
+            for _, row in df.iterrows():
+                club = row.get("Club")
+                elo  = row.get("Elo")
+                if pd.notna(club) and pd.notna(elo):
+                    result[str(club).strip()] = float(elo)
+            return result
+        except Exception as e:
+            last_err = e
+            continue
+    print(f"    Warning: Club-Elo ({date}): {last_err}")
+    return {}
+
+
+def download_clubelo_with_fallback(max_days_back: int = 3) -> tuple[str, dict]:
+    """
+    Versucht Club-Elo für heute, dann bis max_days_back Tage zurück.
+    Gibt (date_str, elo_dict) zurück. date_str leer bei Fehlschlag.
+    """
+    today = datetime.now(timezone.utc).date()
+    for i in range(max_days_back + 1):
+        d = today - timedelta(days=i)
+        date_str = d.strftime("%Y-%m-%d")
+        elo_dict = download_clubelo(date_str)
+        if elo_dict:
+            return date_str, elo_dict
+    return "", {}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -350,7 +401,9 @@ def load_football_data(sport_key: str) -> pd.DataFrame | None:
     if sport_key == "soccer_germany_liga3":
         return load_liga3_data()
 
-    urls = FDCO_URLS.get(sport_key, [])
+    season_codes = current_season_codes()
+    league_code = FDCO_LEAGUES.get(sport_key)
+    urls = build_fdco_urls(league_code, season_codes) if league_code else []
     frames = []
     for url in urls:
         df_raw = download_fdco(url)
@@ -371,12 +424,14 @@ def load_european_data() -> pd.DataFrame | None:
     Poisson-Modell (O/U bei UEFA-Wettbewerben).
     """
     frames = []
-    for url in EUROPEAN_FDCO_URLS:
-        df_raw = download_fdco(url)
-        if df_raw is not None:
-            df = standardize_fdco(df_raw)
-            if df is not None and len(df) > 5:
-                frames.append(df)
+    season_codes = current_season_codes()
+    for league_code in EUROPEAN_FDCO_LEAGUES:
+        for url in build_fdco_urls(league_code, season_codes):
+            df_raw = download_fdco(url)
+            if df_raw is not None:
+                df = standardize_fdco(df_raw)
+                if df is not None and len(df) > 5:
+                    frames.append(df)
     if not frames:
         return None
     combined = pd.concat(frames, ignore_index=True)
@@ -421,6 +476,8 @@ def fit_poisson_model(df: pd.DataFrame) -> dict:
     res = minimize(neg_ll, x0, method="SLSQP",
                    constraints=constraints,
                    options={"maxiter": 2000, "ftol": 1e-9})
+    if not res.success:
+        raise RuntimeError(f"Poisson-Fit fehlgeschlagen: {res.message}")
 
     x   = res.x
     return {
@@ -1108,14 +1165,25 @@ def generate_html(football_bets: list, ou_bets: list,
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Sports Value Scanner")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Keine externen API-Calls; erzeugt leeren Report für Smoke-Check.",
+    )
+    return parser.parse_args()
+
+
 def main() -> int:
+    args = parse_args()
     print("=" * 60)
     print(f"  Sports Value Scanner — {datetime.now().strftime('%d.%m.%Y %H:%M')}")
     print("=" * 60)
 
     creds = load_creds()
     api_key = creds.get("ODDS_API_KEY", "")
-    if not api_key:
+    if not args.dry_run and not api_key:
         print("ERROR: ODDS_API_KEY fehlt in ~/.stock_scanner_credentials")
         return 1
 
@@ -1123,131 +1191,169 @@ def main() -> int:
     out_dir  = OUTPUT_DIR / date_str
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # ── BACKTESTING ──────────────────────────────────────────────────────────
+    try:
+        _git_hash = subprocess.check_output(
+            ["git", "-C", str(SCRIPT_DIR), "rev-parse", "--short", "HEAD"],
+            text=True, stderr=subprocess.DEVNULL,
+        ).strip()
+    except Exception:
+        _git_hash = "unknown"
+    init_db()
+    _n_training: int = 0
+    _run_id: int | None = None
+
     all_football_bets: list = []
     all_ou_bets:       list = []
     all_tennis_bets:   list = []
     all_uefa_bets:     list = []
 
-    # ── FUSSBALL ────────────────────────────────────────────────────────────
-    print("\n[⚽ Fußball] Daten laden & Modelle trainieren …")
-    football_models = {}
-
-    for sport_key in FOOTBALL_SPORTS:
-        label = SPORT_LABELS.get(sport_key, sport_key)
-        print(f"  {label}:")
-        df = load_football_data(sport_key)
-        if df is None or len(df) < 20:
-            print(f"    Nicht genug Daten ({len(df) if df is not None else 0} Matches) – übersprungen")
-            continue
-        n_teams = df["HomeTeam"].nunique()
-        print(f"    {len(df)} Matches, {n_teams} Teams → trainiere Poisson …")
-        try:
-            model = fit_poisson_model(df)
-            football_models[sport_key] = model
-            print(f"    OK. Home-Vorteil={model['home_adv']:.3f}")
-        except Exception as e:
-            print(f"    Modell-Fehler: {e}")
-
-    print("\n[⚽ Fußball] Upcoming Matches via Odds API …")
-    for sport_key in FOOTBALL_SPORTS:
-        label = SPORT_LABELS.get(sport_key, sport_key)
-        print(f"  {label}:")
-        try:
-            matches = get_odds(api_key, sport_key)
-        except Exception as e:
-            print(f"    Fehler: {e}")
-            continue
-
-        model = football_models.get(sport_key)
-        if model is None:
-            print(f"    Kein Modell – Odds werden ignoriert")
-            continue
-
-        for match in matches:
-            bets = analyze_football_match(match, model)
-            if bets:
-                all_football_bets.extend(bets)
-                for b in bets:
-                    print(f"    ✓ VALUE: {b['match']} → {b['tip']} "
-                          f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
-            ou_bets_match = analyze_football_ou(match, model)
-            if ou_bets_match:
-                all_ou_bets.extend(ou_bets_match)
-                for b in ou_bets_match:
-                    print(f"    ✓ O/U VALUE: {b['match']} → {b['tip']} "
-                          f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
-
-    # ── TENNIS ──────────────────────────────────────────────────────────────
-    print("\n[🎾 Tennis] Elo-Ratings berechnen …")
-    elo_dict = compute_tennis_elo(ELO_YEARS)
-    print(f"  {len(elo_dict)} Spieler im Elo-Dict")
-
-    print("\n[🎾 Tennis] Aktive Turniere suchen …")
-    try:
-        all_sports   = get_active_sports(api_key)
-        tennis_sports = [s for s in all_sports
-                         if s["key"].startswith("tennis_") and s["active"]]
-        print(f"  {len(tennis_sports)} aktive Tennis-Turniere:")
-        for s in tennis_sports:
-            print(f"    - {s['key']} ({s['title']})")
-    except Exception as e:
-        print(f"  Fehler: {e}")
-        tennis_sports = []
-
-    for sport in tennis_sports:
-        sport_key = sport["key"]
-        title     = sport["title"]
-        print(f"  {title}:")
-        try:
-            matches = get_odds(api_key, sport_key, markets="h2h")
-        except Exception as e:
-            print(f"    Fehler: {e}")
-            continue
-        for match in matches:
-            bets = analyze_tennis_match(match, title, elo_dict)
-            if bets:
-                all_tennis_bets.extend(bets)
-                for b in bets:
-                    print(f"    ✓ VALUE: {b['match']} → {b['tip']} "
-                          f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
-
-    # ── UEFA ────────────────────────────────────────────────────────────────
-    print("\n[🏆 UEFA] Club-Elo-Ratings laden …")
-    elo_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    club_elo_dict = download_clubelo(elo_date)
-    print(f"  {len(club_elo_dict)} Clubs im Elo-Dict")
-
-    print("\n[🏆 UEFA] Europäisches Poisson-Modell trainieren …")
-    euro_df = load_european_data()
-    euro_model = None
-    if euro_df is not None and len(euro_df) >= 20:
-        n_teams = euro_df["HomeTeam"].nunique()
-        print(f"  {len(euro_df)} Matches, {n_teams} Teams → trainiere Poisson …")
-        try:
-            euro_model = fit_poisson_model(euro_df)
-            print(f"  OK. Home-Vorteil={euro_model['home_adv']:.3f}")
-        except Exception as e:
-            print(f"  Modell-Fehler: {e}")
+    if args.dry_run:
+        print("\n[DRY-RUN] Keine externen API-Calls. Erzeuge leeren Report …")
     else:
-        print("  Nicht genug Daten für europäisches Modell")
+        # ── FUSSBALL ────────────────────────────────────────────────────────
+        print("\n[⚽ Fußball] Daten laden & Modelle trainieren …")
+        football_models = {}
 
-    print("\n[🏆 UEFA] Matches via Odds API …")
-    for sport_key in UEFA_SPORTS:
-        label = UEFA_LABELS.get(sport_key, sport_key)
-        print(f"  {label}:")
+        for sport_key in FOOTBALL_SPORTS:
+            label = SPORT_LABELS.get(sport_key, sport_key)
+            print(f"  {label}:")
+            df = load_football_data(sport_key)
+            if df is None or len(df) < 20:
+                print(f"    Nicht genug Daten ({len(df) if df is not None else 0} Matches) – übersprungen")
+                continue
+            n_teams = df["HomeTeam"].nunique()
+            print(f"    {len(df)} Matches, {n_teams} Teams → trainiere Poisson …")
+            try:
+                model = fit_poisson_model(df)
+                football_models[sport_key] = model
+                _n_training += len(df)
+                print(f"    OK. Home-Vorteil={model['home_adv']:.3f}")
+            except Exception as e:
+                print(f"    Modell-Fehler: {e}")
+
+        _run_id = log_scan_run(
+            scanned_at=datetime.now().isoformat(),
+            model_version=_git_hash,
+            training_matches=_n_training,
+        )
+
+        print("\n[⚽ Fußball] Upcoming Matches via Odds API …")
+        for sport_key in FOOTBALL_SPORTS:
+            label = SPORT_LABELS.get(sport_key, sport_key)
+            print(f"  {label}:")
+            try:
+                matches = get_odds(api_key, sport_key)
+            except Exception as e:
+                print(f"    Fehler: {e}")
+                continue
+            if ODDS_API_REMAINING is not None and ODDS_API_REMAINING <= MIN_ODDS_API_REMAINING:
+                print(f"    Hinweis: API-Quota sehr niedrig ({ODDS_API_REMAINING}) – stoppe weitere Odds-Calls.")
+                break
+
+            model = football_models.get(sport_key)
+            if model is None:
+                print(f"    Kein Modell – Odds werden ignoriert")
+                continue
+
+            for match in matches:
+                bets = analyze_football_match(match, model)
+                if bets:
+                    all_football_bets.extend(bets)
+                    for b in bets:
+                        log_prediction(_run_id, b, match_raw=match)
+                        print(f"    ✓ VALUE: {b['match']} → {b['tip']} "
+                              f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
+                ou_bets_match = analyze_football_ou(match, model)
+                if ou_bets_match:
+                    all_ou_bets.extend(ou_bets_match)
+                    for b in ou_bets_match:
+                        log_prediction(_run_id, b, match_raw=match)
+                        print(f"    ✓ O/U VALUE: {b['match']} → {b['tip']} "
+                              f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
+
+        # ── TENNIS ──────────────────────────────────────────────────────────
+        print("\n[🎾 Tennis] Elo-Ratings berechnen …")
+        elo_years = get_elo_years()
+        elo_dict = compute_tennis_elo(elo_years)
+        print(f"  {len(elo_dict)} Spieler im Elo-Dict")
+
+        print("\n[🎾 Tennis] Aktive Turniere suchen …")
         try:
-            matches = get_odds(api_key, sport_key)
+            all_sports   = get_active_sports(api_key)
+            tennis_sports = [s for s in all_sports
+                             if s["key"].startswith("tennis_") and s["active"]]
+            print(f"  {len(tennis_sports)} aktive Tennis-Turniere:")
+            for s in tennis_sports:
+                print(f"    - {s['key']} ({s['title']})")
         except Exception as e:
-            print(f"    Fehler: {e}")
-            continue
-        for match in matches:
-            bets = analyze_uefa_match(match, club_elo_dict, euro_model)
-            if bets:
-                all_uefa_bets.extend(bets)
-                for b in bets:
-                    typ = b["bet_type"].upper()
-                    print(f"    ✓ UEFA VALUE [{typ}]: {b['match']} → {b['tip']} "
-                          f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
+            print(f"  Fehler: {e}")
+            tennis_sports = []
+
+        for sport in tennis_sports:
+            sport_key = sport["key"]
+            title     = sport["title"]
+            print(f"  {title}:")
+            try:
+                matches = get_odds(api_key, sport_key, markets="h2h")
+            except Exception as e:
+                print(f"    Fehler: {e}")
+                continue
+            if ODDS_API_REMAINING is not None and ODDS_API_REMAINING <= MIN_ODDS_API_REMAINING:
+                print(f"    Hinweis: API-Quota sehr niedrig ({ODDS_API_REMAINING}) – stoppe weitere Odds-Calls.")
+                break
+            for match in matches:
+                bets = analyze_tennis_match(match, title, elo_dict)
+                if bets:
+                    all_tennis_bets.extend(bets)
+                    for b in bets:
+                        log_prediction(_run_id, b, match_raw=match)
+                        print(f"    ✓ VALUE: {b['match']} → {b['tip']} "
+                              f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
+
+        # ── UEFA ────────────────────────────────────────────────────────────
+        print("\n[🏆 UEFA] Club-Elo-Ratings laden …")
+        elo_date, club_elo_dict = download_clubelo_with_fallback(max_days_back=3)
+        if elo_date:
+            print(f"  {len(club_elo_dict)} Clubs im Elo-Dict (Datum: {elo_date})")
+        else:
+            print("  Warning: Keine Club-Elo-Daten gefunden (letzte 3 Tage)")
+
+        print("\n[🏆 UEFA] Europäisches Poisson-Modell trainieren …")
+        euro_df = load_european_data()
+        euro_model = None
+        if euro_df is not None and len(euro_df) >= 20:
+            n_teams = euro_df["HomeTeam"].nunique()
+            print(f"  {len(euro_df)} Matches, {n_teams} Teams → trainiere Poisson …")
+            try:
+                euro_model = fit_poisson_model(euro_df)
+                print(f"  OK. Home-Vorteil={euro_model['home_adv']:.3f}")
+            except Exception as e:
+                print(f"  Modell-Fehler: {e}")
+        else:
+            print("  Nicht genug Daten für europäisches Modell")
+
+        print("\n[🏆 UEFA] Matches via Odds API …")
+        for sport_key in UEFA_SPORTS:
+            label = UEFA_LABELS.get(sport_key, sport_key)
+            print(f"  {label}:")
+            try:
+                matches = get_odds(api_key, sport_key)
+            except Exception as e:
+                print(f"    Fehler: {e}")
+                continue
+            if ODDS_API_REMAINING is not None and ODDS_API_REMAINING <= MIN_ODDS_API_REMAINING:
+                print(f"    Hinweis: API-Quota sehr niedrig ({ODDS_API_REMAINING}) – stoppe weitere Odds-Calls.")
+                break
+            for match in matches:
+                bets = analyze_uefa_match(match, club_elo_dict, euro_model)
+                if bets:
+                    all_uefa_bets.extend(bets)
+                    for b in bets:
+                        log_prediction(_run_id, b, match_raw=match)
+                        typ = b["bet_type"].upper()
+                        print(f"    ✓ UEFA VALUE [{typ}]: {b['match']} → {b['tip']} "
+                              f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
 
     # ── REPORT ──────────────────────────────────────────────────────────────
     print(f"\n[📊 Report] Football Bets: {len(all_football_bets)}")
@@ -1325,6 +1431,9 @@ def main() -> int:
         csv_path = out_dir / "sports_signals.csv"
         pd.DataFrame(rows).to_csv(csv_path, index=False)
         print(f"[📊 Report] CSV:  {csv_path}")
+
+    if _run_id is not None:
+        resolve_results()
 
     print("\n✓ Fertig!")
     return 0
