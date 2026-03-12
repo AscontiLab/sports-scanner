@@ -40,19 +40,15 @@ def require_keys(creds: dict, keys: list[str]) -> bool:
 def build_subject(html_path: Path) -> str:
     date_str = datetime.now().strftime("%d.%m.%Y")
     try:
-        content  = html_path.read_text(encoding="utf-8")
-        fb_match = re.search(r'Football Bets.*?(\d+)', content)
-        tn_match = re.search(r'Tennis Bets.*?(\d+)',   content)
-        # Zähle Tabellenzeilen als Proxy
-        fb = len(re.findall(r'⚽.*?VALUE|class="tag"', content)) or "?"
-        tn = len(re.findall(r'🎾.*?VALUE|class="tag2"', content)) or "?"
-        fb_count = re.search(r'val">(\\d+)<.*?lbl.*?⚽', content)
-        # Einfacher: Summary-Cards auslesen
+        content = html_path.read_text(encoding="utf-8")
+        # Summary-Cards Reihenfolge: Total, FB 1X2, O/U, UEFA, Tennis, Max Edge
         cards = re.findall(r'<div class="val">(\d+)</div>', content)
         total = cards[0] if len(cards) > 0 else "?"
         fb    = cards[1] if len(cards) > 1 else "?"
-        tn    = cards[2] if len(cards) > 2 else "?"
-        return f"⚽🎾 Sports Value Scanner {date_str} — {total} Bets (FB:{fb} TN:{tn})"
+        ou    = cards[2] if len(cards) > 2 else "?"
+        uefa  = cards[3] if len(cards) > 3 else "?"
+        tn    = cards[4] if len(cards) > 4 else "?"
+        return f"⚽🎾 Sports Value Scanner {date_str} — {total} Bets (FB:{fb} O/U:{ou} UEFA:{uefa} TN:{tn})"
     except Exception:
         return f"⚽🎾 Sports Value Scanner {date_str}"
 

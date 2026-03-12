@@ -248,30 +248,22 @@ def get_odds(api_key: str, sport_key: str, markets: str = "h2h,totals") -> list:
         "oddsFormat": "decimal",
         "dateFormat": "iso",
     }
-    last_error = None
-    for attempt in range(3):
-        try:
-            r = requests.get(f"{ODDS_API_BASE}/sports/{sport_key}/odds",
-                             params=params, timeout=20)
-            if r.status_code == 404:
-                return []
-            r.raise_for_status()
-            remaining = r.headers.get("x-requests-remaining", "?")
-            try:
-                remaining_int = int(remaining)
-            except Exception:
-                remaining_int = None
-            global ODDS_API_REMAINING
-            ODDS_API_REMAINING = remaining_int
-            print(f"    → {len(r.json())} Matches | API-Requests verbleibend: {remaining}")
-            return r.json()
-        except Exception as e:
-            last_error = e
-            if attempt < 2:
-                wait = [2, 4][attempt]
-                print(f"    Retry ({attempt + 1}/3): {e} – warte {wait}s …")
-                time.sleep(wait)
-    raise last_error
+    try:
+        r = _request_with_retry(f"{ODDS_API_BASE}/sports/{sport_key}/odds",
+                                params=params, timeout=20)
+    except requests.exceptions.HTTPError as e:
+        if e.response is not None and e.response.status_code == 404:
+            return []
+        raise
+    remaining = r.headers.get("x-requests-remaining", "?")
+    try:
+        remaining_int = int(remaining)
+    except Exception:
+        remaining_int = None
+    global ODDS_API_REMAINING
+    ODDS_API_REMAINING = remaining_int
+    print(f"    → {len(r.json())} Matches | API-Requests verbleibend: {remaining}")
+    return r.json()
 
 
 def best_odds_from_match(match: dict) -> dict:
@@ -1534,13 +1526,12 @@ def generate_kicktipp_html(matches: list) -> str:
 
 def edge_class(e: float) -> str:
     if e >= 10: return "g"
-    if e >= 5:  return "o"
-    return "y"
+    if e >= 5:  return "y"
+    return "o"
 
 
 def _group_by_league(bets: list, label_map: dict, key: str = "sport") -> dict:
     """Gruppiert Bets nach Liga/Turnier, sortiert innerhalb nach Anstoß + Edge."""
-    from collections import OrderedDict
     groups = {}
     for b in bets:
         league = label_map.get(b[key], b[key]) if label_map else b[key]
@@ -1548,7 +1539,7 @@ def _group_by_league(bets: list, label_map: dict, key: str = "sport") -> dict:
     for league in groups:
         groups[league].sort(key=lambda x: (x["kick_off"], -x["edge_pct"]))
     # Sortiere Ligen nach frühestem Anstoß
-    return OrderedDict(sorted(groups.items(), key=lambda kv: kv[1][0]["kick_off"]))
+    return dict(sorted(groups.items(), key=lambda kv: kv[1][0]["kick_off"]))
 
 
 def build_football_table(bets: list) -> str:

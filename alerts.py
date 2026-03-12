@@ -12,8 +12,7 @@ import requests
 from pathlib import Path
 
 
-def load_telegram_creds() -> tuple[str, str]:
-    """Gibt (bot_token, chat_id) zurück."""
+def _load_creds() -> dict:
     cred_file = Path.home() / ".stock_scanner_credentials"
     creds = {}
     if cred_file.exists():
@@ -23,6 +22,12 @@ def load_telegram_creds() -> tuple[str, str]:
                 if "=" in line and not line.startswith("#"):
                     k, v = line.split("=", 1)
                     creds[k.strip()] = v.strip()
+    return creds
+
+
+def load_telegram_creds() -> tuple[str, str]:
+    """Gibt (bot_token, chat_id) zurück."""
+    creds = _load_creds()
     return creds.get("TELEGRAM_BOT_TOKEN", ""), creds.get("TELEGRAM_CHAT_ID", "")
 
 
