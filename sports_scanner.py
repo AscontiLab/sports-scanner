@@ -757,11 +757,13 @@ def compute_tennis_elo(years: list) -> tuple[dict, dict]:
     Gibt (gesamt_elo, surface_elo) zurück.
     surface_elo = {"Hard": {name: elo}, "Clay": {...}, "Grass": {...}}
     """
+    from concurrent.futures import ThreadPoolExecutor
     elo = {}
     surface_elo = {"Hard": {}, "Clay": {}, "Grass": {}}
     all_frames = []
-    for year in years:
-        df = download_atp_year(year)
+    with ThreadPoolExecutor(max_workers=len(years)) as pool:
+        results = list(pool.map(download_atp_year, years))
+    for df in results:
         if df is not None and "winner_name" in df.columns:
             all_frames.append(df)
     if not all_frames:
@@ -817,11 +819,13 @@ def download_wta_year(year: int) -> pd.DataFrame | None:
 def compute_wta_elo(years: list) -> tuple[dict, dict]:
     """Berechnet Elo-Ratings aus historischen WTA-Matches.
     Gibt (gesamt_elo, surface_elo) zurück."""
+    from concurrent.futures import ThreadPoolExecutor
     elo = {}
     surface_elo = {"Hard": {}, "Clay": {}, "Grass": {}}
     all_frames = []
-    for year in years:
-        df = download_wta_year(year)
+    with ThreadPoolExecutor(max_workers=len(years)) as pool:
+        results = list(pool.map(download_wta_year, years))
+    for df in results:
         if df is not None and "winner_name" in df.columns:
             all_frames.append(df)
     if not all_frames:
@@ -1168,36 +1172,40 @@ def analyze_tennis_match(match: dict, tournament: str,
 # ═══════════════════════════════════════════════════════════════════════════════
 
 CSS = """
-body { font-family:'Segoe UI',Arial,sans-serif; background:#ffffff; color:#1a1a2e; margin:0; padding:20px; }
-h1   { color:#1a56a0; border-bottom:2px solid #dde3ed; padding-bottom:10px; font-size:1.6em; }
-h2   { color:#c05a00; margin-top:32px; font-size:1.15em; }
-.summary { display:flex; gap:16px; flex-wrap:wrap; margin:18px 0 24px; }
-.card { background:#f0f5ff; border:1px solid #c8d8f0; border-radius:8px;
-        padding:14px 22px; min-width:130px; }
-.card .val { font-size:1.9em; font-weight:700; color:#1a56a0; }
-.card .lbl { color:#555577; font-size:0.8em; margin-top:2px; }
-table { width:100%; border-collapse:collapse; background:#ffffff;
-        border:1px solid #dde3ed; border-radius:8px; overflow:hidden; margin:14px 0; }
-th  { background:#eef2fa; padding:9px 12px; text-align:left;
-      color:#444466; font-size:0.82em; border-bottom:1px solid #dde3ed; }
-td  { padding:8px 12px; border-bottom:1px solid #eef2fa; font-size:0.88em; color:#1a1a2e; }
-tr:last-child td { border-bottom:none; }
-tr:hover td { background:#f5f8ff; }
-.g  { color:#1a7a30; font-weight:700; }
-.y  { color:#a06000; font-weight:700; }
-.o  { color:#b54000; font-weight:700; }
-.tag{ background:#1a56a0; color:#fff; border-radius:4px;
-      padding:2px 7px; font-size:0.75em; }
-.tag2{ background:#e0ebff; color:#1a56a0; border:1px solid #b0ccee;
-       border-radius:4px; padding:2px 7px; font-size:0.75em; }
-.empty{ color:#777799; padding:18px; text-align:center;
-        background:#f7f9ff; border:1px solid #dde3ed; border-radius:8px; }
-.note { background:#fff8e8; border-left:3px solid #e09000; padding:10px 14px;
-        color:#664400; font-size:0.82em; border-radius:0 6px 6px 0; margin:10px 0; }
-.tag3{ background:#5c2d91; color:#fff; border-radius:4px;
-       padding:2px 7px; font-size:0.75em; }
-.footer{ color:#777799; font-size:0.78em; margin-top:30px;
-         border-top:1px solid #dde3ed; padding-top:14px; }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
+:root{--bg:#0a0a1a;--surface:rgba(15,15,35,0.8);--border:rgba(0,240,255,0.15);--cyan:#00f0ff;--gold:#c8aa6e;--pink:#ff006e;--green:#00ff88;--text:#e8e8f0;--dim:#6e6e80}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Inter,sans-serif;background:var(--bg);color:var(--text);padding:20px;min-height:100vh}
+h1{color:var(--cyan);font-size:1.6em;padding-bottom:10px;border-bottom:1px solid var(--border);margin-bottom:6px}
+h2{color:var(--gold);margin-top:32px;font-size:1.15em;padding-left:10px;border-left:3px solid var(--gold)}
+.summary{display:flex;gap:14px;flex-wrap:wrap;margin:18px 0 24px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;
+      padding:14px 22px;min-width:130px;backdrop-filter:blur(16px);transition:all .25s}
+.card:hover{border-color:var(--cyan);box-shadow:0 0 20px rgba(0,240,255,0.1)}
+.card .val{font-family:'JetBrains Mono',monospace;font-size:1.9em;font-weight:700;color:var(--cyan)}
+.card .lbl{color:var(--dim);font-size:0.8em;margin-top:2px}
+table{width:100%;border-collapse:collapse;background:var(--surface);
+      border:1px solid var(--border);border-radius:12px;overflow:hidden;margin:14px 0}
+th{background:rgba(0,240,255,0.06);padding:9px 12px;text-align:left;
+   color:var(--gold);font-size:0.78em;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.04);font-size:0.88em;color:var(--text)}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(0,240,255,0.04)}
+.g{color:var(--green);font-weight:700}
+.y{color:var(--gold);font-weight:700}
+.o{color:var(--pink);font-weight:700}
+.tag{background:var(--cyan);color:var(--bg);border-radius:4px;
+     padding:2px 7px;font-size:0.75em;font-weight:600}
+.tag2{background:rgba(0,240,255,0.1);color:var(--cyan);border:1px solid var(--border);
+      border-radius:4px;padding:2px 7px;font-size:0.75em}
+.empty{color:var(--dim);padding:18px;text-align:center;
+       background:var(--surface);border:1px solid var(--border);border-radius:12px}
+.note{background:rgba(200,170,110,0.08);border-left:3px solid var(--gold);padding:10px 14px;
+      color:var(--gold);font-size:0.82em;border-radius:0 8px 8px 0;margin:10px 0}
+.tag3{background:rgba(255,0,110,0.15);color:var(--pink);border:1px solid rgba(255,0,110,0.3);
+      border-radius:4px;padding:2px 7px;font-size:0.75em}
+.footer{color:var(--dim);font-size:0.78em;margin-top:30px;
+        border-top:1px solid var(--border);padding-top:14px}
 """
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1850,15 +1858,17 @@ def main() -> int:
                               f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
 
         # ── TENNIS ──────────────────────────────────────────────────────────
-        print("\n[🎾 Tennis] ATP Elo-Ratings berechnen …")
+        print("\n[🎾 Tennis] ATP + WTA Elo-Ratings parallel berechnen …")
         elo_years = get_elo_years()
-        atp_elo_dict, atp_surface_elo = compute_tennis_elo(elo_years)
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            atp_future = pool.submit(compute_tennis_elo, elo_years)
+            wta_future = pool.submit(compute_wta_elo, elo_years)
+            atp_elo_dict, atp_surface_elo = atp_future.result()
+            wta_elo_dict, wta_surface_elo = wta_future.result()
         print(f"  ATP: {len(atp_elo_dict)} Spieler im Elo-Dict")
         for surf, sdict in atp_surface_elo.items():
             print(f"    {surf}: {len(sdict)} Spieler")
-
-        print("\n[🎾 Tennis] WTA Elo-Ratings berechnen …")
-        wta_elo_dict, wta_surface_elo = compute_wta_elo(elo_years)
         print(f"  WTA: {len(wta_elo_dict)} Spielerinnen im Elo-Dict")
         for surf, sdict in wta_surface_elo.items():
             print(f"    {surf}: {len(sdict)} Spielerinnen")

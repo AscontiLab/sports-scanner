@@ -36,7 +36,13 @@ def build_subject(html_path: Path) -> str:
 
 
 def send_report(html_path: Path):
-    creds     = load_credentials()
+    creds = load_credentials()
+    required_keys = ["GMAIL_USER", "GMAIL_APP_PASSWORD", "GMAIL_RECIPIENT"]
+    missing = [k for k in required_keys if not creds.get(k)]
+    if missing:
+        print(f"Fehler: Fehlende Credentials: {', '.join(missing)}", file=sys.stderr)
+        print("Bitte in ~/.stock_scanner_credentials eintragen.", file=sys.stderr)
+        sys.exit(1)
     user      = creds["GMAIL_USER"]
     password  = creds["GMAIL_APP_PASSWORD"]
     recipient = creds["GMAIL_RECIPIENT"]
