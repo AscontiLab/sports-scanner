@@ -1215,6 +1215,8 @@ tr:hover td{background:rgba(0,240,255,0.04)}
       color:var(--gold);font-size:0.82em;border-radius:0 8px 8px 0;margin:10px 0}
 .tag3{background:rgba(255,0,110,0.15);color:var(--pink);border:1px solid rgba(255,0,110,0.3);
       border-radius:4px;padding:2px 7px;font-size:0.75em}
+.league-header{color:var(--text);font-size:0.95em;margin:18px 0 4px 0;padding:0;border:none}
+.league-header .tag,.league-header .tag2,.league-header .tag3{font-size:0.85em;padding:3px 10px}
 .footer{color:var(--dim);font-size:0.78em;margin-top:30px;
         border-top:1px solid var(--border);padding-top:14px}
 """
@@ -1536,16 +1538,31 @@ def edge_class(e: float) -> str:
     return "y"
 
 
+def _group_by_league(bets: list, label_map: dict, key: str = "sport") -> dict:
+    """Gruppiert Bets nach Liga/Turnier, sortiert innerhalb nach Anstoß + Edge."""
+    from collections import OrderedDict
+    groups = {}
+    for b in bets:
+        league = label_map.get(b[key], b[key]) if label_map else b[key]
+        groups.setdefault(league, []).append(b)
+    for league in groups:
+        groups[league].sort(key=lambda x: (x["kick_off"], -x["edge_pct"]))
+    # Sortiere Ligen nach frühestem Anstoß
+    return OrderedDict(sorted(groups.items(), key=lambda kv: kv[1][0]["kick_off"]))
+
+
 def build_football_table(bets: list) -> str:
     if not bets:
         return '<div class="empty">Keine Football-Value-Bets gefunden – Modell benötigt ausreichend historische Matches für alle Teams.</div>'
-    headers = ["Liga", "Spiel", "Tipp", "Anstoß", "Modell-%", "Beste Quote", "Edge-%", "Kelly-%", "λ Heim", "λ Gast"]
-    rows = ""
-    for b in sorted(bets, key=lambda x: (x["kick_off"], -x["edge_pct"])):
-        tag   = SPORT_LABELS.get(b["sport"], b["sport"])
-        ec    = edge_class(b["edge_pct"])
-        rows += f"""<tr>
-          <td><span class="tag">{tag}</span></td>
+    headers = ["Spiel", "Tipp", "Anstoß", "Modell-%", "Beste Quote", "Edge-%", "Kelly-%", "λ Heim", "λ Gast"]
+    ths = "".join(f"<th>{h}</th>" for h in headers)
+    html = ""
+    for league, league_bets in _group_by_league(bets, SPORT_LABELS).items():
+        html += f'<h3 class="league-header"><span class="tag">{league}</span> ({len(league_bets)})</h3>'
+        rows = ""
+        for b in league_bets:
+            ec = edge_class(b["edge_pct"])
+            rows += f"""<tr>
           <td><strong>{b['match']}</strong></td>
           <td>{b['tip']}</td>
           <td>{format_dt(b['kick_off'])}</td>
@@ -1556,20 +1573,22 @@ def build_football_table(bets: list) -> str:
           <td style="color:#8b949e">{b['lam_home']:.2f}</td>
           <td style="color:#8b949e">{b['lam_away']:.2f}</td>
         </tr>"""
-    ths = "".join(f"<th>{h}</th>" for h in headers)
-    return f"<table><tr>{ths}</tr>{rows}</table>"
+        html += f"<table><tr>{ths}</tr>{rows}</table>"
+    return html
 
 
 def build_ou_table(bets: list) -> str:
     if not bets:
         return '<div class="empty">Keine Über/Unter Value Bets gefunden.</div>'
-    headers = ["Liga", "Spiel", "Tipp", "Anstoß", "Modell-%", "Beste Quote", "Edge-%", "Kelly-%", "λ Heim", "λ Gast"]
-    rows = ""
-    for b in sorted(bets, key=lambda x: (x["kick_off"], -x["edge_pct"])):
-        tag = SPORT_LABELS.get(b["sport"], b["sport"])
-        ec  = edge_class(b["edge_pct"])
-        rows += f"""<tr>
-          <td><span class="tag">{tag}</span></td>
+    headers = ["Spiel", "Tipp", "Anstoß", "Modell-%", "Beste Quote", "Edge-%", "Kelly-%", "λ Heim", "λ Gast"]
+    ths = "".join(f"<th>{h}</th>" for h in headers)
+    html = ""
+    for league, league_bets in _group_by_league(bets, SPORT_LABELS).items():
+        html += f'<h3 class="league-header"><span class="tag">{league}</span> ({len(league_bets)})</h3>'
+        rows = ""
+        for b in league_bets:
+            ec = edge_class(b["edge_pct"])
+            rows += f"""<tr>
           <td><strong>{b['match']}</strong></td>
           <td>{b['tip']}</td>
           <td>{format_dt(b['kick_off'])}</td>
@@ -1580,22 +1599,24 @@ def build_ou_table(bets: list) -> str:
           <td style="color:#8b949e">{b['lam_home']:.2f}</td>
           <td style="color:#8b949e">{b['lam_away']:.2f}</td>
         </tr>"""
-    ths = "".join(f"<th>{h}</th>" for h in headers)
-    return f"<table><tr>{ths}</tr>{rows}</table>"
+        html += f"<table><tr>{ths}</tr>{rows}</table>"
+    return html
 
 
 def build_uefa_table(bets: list) -> str:
     if not bets:
         return '<div class="empty">Keine UEFA Value Bets gefunden.</div>'
-    headers = ["Wettbewerb", "Spiel", "Typ", "Tipp", "Anstoß",
+    headers = ["Spiel", "Typ", "Tipp", "Anstoß",
                "Modell-%", "Beste Quote", "Edge-%", "Kelly-%", "Modell"]
-    rows = ""
-    for b in sorted(bets, key=lambda x: (x["kick_off"], -x["edge_pct"])):
-        tag = UEFA_LABELS.get(b["sport"], b["sport"])
-        ec  = edge_class(b["edge_pct"])
-        typ_label = "1X2" if b["bet_type"] == "1x2" else "O/U"
-        rows += f"""<tr>
-          <td><span class="tag3">{tag}</span></td>
+    ths = "".join(f"<th>{h}</th>" for h in headers)
+    html = ""
+    for league, league_bets in _group_by_league(bets, UEFA_LABELS).items():
+        html += f'<h3 class="league-header"><span class="tag3">{league}</span> ({len(league_bets)})</h3>'
+        rows = ""
+        for b in league_bets:
+            ec = edge_class(b["edge_pct"])
+            typ_label = "1X2" if b["bet_type"] == "1x2" else "O/U"
+            rows += f"""<tr>
           <td><strong>{b['match']}</strong></td>
           <td>{typ_label}</td>
           <td>{b['tip']}</td>
@@ -1606,23 +1627,26 @@ def build_uefa_table(bets: list) -> str:
           <td style="color:#58a6ff">{b['kelly_pct']:.1f}%</td>
           <td style="color:#8b949e">{b['model_src']}</td>
         </tr>"""
-    ths = "".join(f"<th>{h}</th>" for h in headers)
-    return f"<table><tr>{ths}</tr>{rows}</table>"
+        html += f"<table><tr>{ths}</tr>{rows}</table>"
+    return html
 
 
 def build_tennis_table(bets: list) -> str:
     if not bets:
         return '<div class="empty">Keine aktiven Tennis-Turniere mit ausreichend Odds gefunden.</div>'
-    headers = ["Turnier", "Spiel", "Tipp", "Zeitpunkt", "Modell-%", "Beste Quote", "Edge-%", "Kelly-%", "Elo", "Modell"]
-    rows = ""
-    for b in sorted(bets, key=lambda x: (x["kick_off"], -x["edge_pct"])):
-        ec        = edge_class(b["edge_pct"])
-        elo       = str(b["elo"]) if b["elo"] else "–"
-        is_konsens = b.get("model_source") == "Konsens"
-        warn      = " ⚠️" if is_konsens else ""
-        row_style = ' style="opacity:0.65"' if is_konsens else ""
-        rows += f"""<tr{row_style}>
-          <td><span class="tag2">{b['tournament']}</span></td>
+    headers = ["Spiel", "Tipp", "Zeitpunkt", "Modell-%", "Beste Quote", "Edge-%", "Kelly-%", "Elo", "Modell"]
+    ths = "".join(f"<th>{h}</th>" for h in headers)
+    html = ""
+    for tournament, t_bets in _group_by_league(bets, None, key="tournament").items():
+        html += f'<h3 class="league-header"><span class="tag2">{tournament}</span> ({len(t_bets)})</h3>'
+        rows = ""
+        for b in t_bets:
+            ec        = edge_class(b["edge_pct"])
+            elo       = str(b["elo"]) if b["elo"] else "–"
+            is_konsens = b.get("model_source") == "Konsens"
+            warn      = " ⚠️" if is_konsens else ""
+            row_style = ' style="opacity:0.65"' if is_konsens else ""
+            rows += f"""<tr{row_style}>
           <td><strong>{b['match']}</strong></td>
           <td>{b['tip']}{warn}</td>
           <td>{format_dt(b['kick_off'])}</td>
@@ -1633,8 +1657,8 @@ def build_tennis_table(bets: list) -> str:
           <td style="color:#8b949e">{elo}</td>
           <td style="color:#8b949e">{b['model_source']}{warn}</td>
         </tr>"""
-    ths = "".join(f"<th>{h}</th>" for h in headers)
-    return f"<table><tr>{ths}</tr>{rows}</table>"
+        html += f"<table><tr>{ths}</tr>{rows}</table>"
+    return html
 
 
 def build_backtesting_section() -> str:
