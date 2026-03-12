@@ -609,11 +609,22 @@ def predict_ou(lam_home: float, lam_away: float, line: float) -> tuple[float, fl
 
 
 def predict_most_likely_score(lam_home: float, lam_away: float,
-                              max_goals: int = 6) -> tuple[int, int]:
-    """Gibt das wahrscheinlichste (Heim-Tore, Gast-Tore) zurück."""
+                              max_goals: int = 6,
+                              tendency: str | None = None) -> tuple[int, int]:
+    """Gibt das wahrscheinlichste (Heim-Tore, Gast-Tore) zurück.
+    Wenn tendency angegeben, wird nur innerhalb der Tendenz gesucht:
+      Heimsieg → home > away, Unentschieden → home == away,
+      Auswärtssieg → away > home.
+    """
     best_p, best_h, best_a = 0.0, 1, 1
     for h in range(max_goals + 1):
         for a in range(max_goals + 1):
+            if tendency == "Heimsieg" and h <= a:
+                continue
+            if tendency == "Unentschieden" and h != a:
+                continue
+            if tendency == "Auswärtssieg" and a <= h:
+                continue
             p = poisson.pmf(h, lam_home) * poisson.pmf(a, lam_away)
             if p > best_p:
                 best_p, best_h, best_a = p, h, a
@@ -1243,6 +1254,7 @@ def collect_kicktipp_predictions(football_models: dict, club_elo_dict: dict,
             model_src = None
 
             # Fallback 1: Poisson-Modell
+            lam_h = lam_a = None
             if model:
                 home_model = find_team_in_model(home_api, model["teams"])
                 away_model = find_team_in_model(away_api, model["teams"])
@@ -1252,9 +1264,8 @@ def collect_kicktipp_predictions(football_models: dict, club_elo_dict: dict,
                         p_home = probs["home"]
                         p_draw = probs["draw"]
                         p_away = probs["away"]
-                        score_home, score_away = predict_most_likely_score(
-                            probs["lam_home"], probs["lam_away"]
-                        )
+                        lam_h = probs["lam_home"]
+                        lam_a = probs["lam_away"]
                         model_src = "Poisson"
 
             # Fallback 2: Club-Elo
@@ -1263,10 +1274,8 @@ def collect_kicktipp_predictions(football_models: dict, club_elo_dict: dict,
                 elo_away = find_club_elo(away_api, club_elo_dict)
                 if elo_home is not None and elo_away is not None:
                     p_home, p_draw, p_away = elo_to_football_1x2(elo_home, elo_away)
-                    # Durchschnitts-Lambda für Score-Schätzung
-                    avg_lam_h = 1.4 + 0.3 * (p_home - 0.33)
-                    avg_lam_a = 1.4 + 0.3 * (p_away - 0.33)
-                    score_home, score_away = predict_most_likely_score(avg_lam_h, avg_lam_a)
+                    lam_h = 1.4 + 0.3 * (p_home - 0.33)
+                    lam_a = 1.4 + 0.3 * (p_away - 0.33)
                     model_src = "ClubElo"
 
             # Fallback 3: Bookie-Konsens
@@ -1276,10 +1285,8 @@ def collect_kicktipp_predictions(football_models: dict, club_elo_dict: dict,
                     p_home = consensus["home"]
                     p_draw = consensus["draw"]
                     p_away = consensus["away"]
-                    # Durchschnitts-Lambda für Score-Schätzung
-                    avg_lam_h = 1.4 + 0.3 * (p_home - 0.33)
-                    avg_lam_a = 1.4 + 0.3 * (p_away - 0.33)
-                    score_home, score_away = predict_most_likely_score(avg_lam_h, avg_lam_a)
+                    lam_h = 1.4 + 0.3 * (p_home - 0.33)
+                    lam_a = 1.4 + 0.3 * (p_away - 0.33)
                     model_src = "Konsens"
 
             # Tendenz bestimmen
@@ -1292,6 +1299,12 @@ def collect_kicktipp_predictions(football_models: dict, club_elo_dict: dict,
                     tendency = "Auswärtssieg"
             else:
                 tendency = "?"
+
+            # Score passend zur Tendenz berechnen
+            if lam_h is not None and lam_a is not None:
+                score_home, score_away = predict_most_likely_score(
+                    lam_h, lam_a, tendency=tendency if tendency != "?" else None
+                )
 
             results.append({
                 "league":      label,
@@ -1325,11 +1338,14 @@ def collect_kicktipp_predictions(football_models: dict, club_elo_dict: dict,
             model_src = None
 
             # Club-Elo für 1X2
+            lam_h = lam_a = None
             if club_elo_dict:
                 elo_home = find_club_elo(home_api, club_elo_dict)
                 elo_away = find_club_elo(away_api, club_elo_dict)
                 if elo_home is not None and elo_away is not None:
                     p_home, p_draw, p_away = elo_to_football_1x2(elo_home, elo_away)
+                    lam_h = 1.4 + 0.3 * (p_home - 0.33)
+                    lam_a = 1.4 + 0.3 * (p_away - 0.33)
                     model_src = "ClubElo"
 
             # Score via euro_model falls vorhanden
@@ -1339,20 +1355,13 @@ def collect_kicktipp_predictions(football_models: dict, club_elo_dict: dict,
                 if home_model and away_model:
                     probs_eu = predict_football(home_model, away_model, euro_model)
                     if probs_eu:
-                        score_home, score_away = predict_most_likely_score(
-                            probs_eu["lam_home"], probs_eu["lam_away"]
-                        )
+                        lam_h = probs_eu["lam_home"]
+                        lam_a = probs_eu["lam_away"]
                         if model_src is None:
                             p_home = probs_eu["home"]
                             p_draw = probs_eu["draw"]
                             p_away = probs_eu["away"]
                             model_src = "Poisson-EU"
-
-            # Score-Fallback via Elo-Durchschnitt
-            if score_home is None and p_home is not None:
-                avg_lam_h = 1.4 + 0.3 * (p_home - 0.33)
-                avg_lam_a = 1.4 + 0.3 * (p_away - 0.33)
-                score_home, score_away = predict_most_likely_score(avg_lam_h, avg_lam_a)
 
             # Fallback Bookie-Konsens
             if p_home is None:
@@ -1361,11 +1370,11 @@ def collect_kicktipp_predictions(football_models: dict, club_elo_dict: dict,
                     p_home = consensus["home"]
                     p_draw = consensus["draw"]
                     p_away = consensus["away"]
-                    avg_lam_h = 1.4 + 0.3 * (p_home - 0.33)
-                    avg_lam_a = 1.4 + 0.3 * (p_away - 0.33)
-                    score_home, score_away = predict_most_likely_score(avg_lam_h, avg_lam_a)
+                    lam_h = 1.4 + 0.3 * (p_home - 0.33)
+                    lam_a = 1.4 + 0.3 * (p_away - 0.33)
                     model_src = "Konsens"
 
+            # Tendenz bestimmen
             if p_home is not None:
                 if p_home >= p_draw and p_home >= p_away:
                     tendency = "Heimsieg"
@@ -1375,6 +1384,12 @@ def collect_kicktipp_predictions(football_models: dict, club_elo_dict: dict,
                     tendency = "Auswärtssieg"
             else:
                 tendency = "?"
+
+            # Score passend zur Tendenz berechnen
+            if lam_h is not None and lam_a is not None:
+                score_home, score_away = predict_most_likely_score(
+                    lam_h, lam_a, tendency=tendency if tendency != "?" else None
+                )
 
             results.append({
                 "league":      label,
