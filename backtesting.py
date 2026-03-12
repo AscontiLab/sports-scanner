@@ -15,14 +15,25 @@ Verwendung in sports_scanner.py:
     for bet in all_football_bets:
         log_prediction(run_id, bet, match_raw=match)
     resolve_results()   # am Ende: offene Bets gegen Scores-API auflösen
+
+CLI:
+    python3 backtesting.py summary          # Gesamtauswertung
+    python3 backtesting.py open             # Offene Predictions
+    python3 backtesting.py resolve          # Ergebnisse via API auflösen
+    python3 backtesting.py stale            # Predictions >7 Tage ohne Ergebnis
+    python3 backtesting.py manual <id> <h> <a>  # Manuelles Ergebnis eintragen
+    python3 backtesting.py void <id>        # Spiel ausgefallen/verschoben
 """
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+import time
+from datetime import datetime, timezone, timedelta
+from difflib import get_close_matches
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent / "sports_backtesting.db"
+_DEFAULT_DB_PATH = Path(__file__).parent / "sports_backtesting.db"
+DB_PATH = _DEFAULT_DB_PATH
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -79,7 +90,7 @@ CREATE TABLE IF NOT EXISTS predictions (
     home_score        INTEGER,           -- NULL = noch nicht gespielt
     away_score        INTEGER,
     bet_won           INTEGER,           -- 1 = gewonnen, 0 = verloren, NULL = offen
-    actual_outcome    TEXT,              -- "home" | "draw" | "away" | "over" | "under"
+    actual_outcome    TEXT,              -- "home" | "draw" | "away" | "over" | "under" | "void"
 
     -- Profit/Loss
     stake_units       REAL    DEFAULT 1.0,
@@ -230,14 +241,67 @@ def _calc_consensus(match_raw: dict | None) -> tuple[float | None, float | None,
     return consensus_home, overround, best_b
 
 
+def _fetch_with_retry(url: str, retries: int = 3) -> list[dict]:
+    """HTTP GET mit Retry-Logik und exponentiellem Backoff."""
+    import urllib.request
+
+    delays = [2, 4, 8]
+    last_error = None
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(url, timeout=15) as resp:
+                return json.loads(resp.read().decode())
+        except Exception as e:
+            last_error = e
+            if attempt < retries - 1:
+                wait = delays[attempt]
+                print(f"[Backtesting] API-Fehler (Versuch {attempt + 1}/{retries}): {e} – warte {wait}s …")
+                time.sleep(wait)
+    raise last_error
+
+
+def _fuzzy_match_score(pred: dict, score_entry: dict, cutoff: float = 0.8) -> bool:
+    """Prüft ob eine Prediction zu einem Score-Eintrag passt (Fuzzy-Matching)."""
+    # Team-Namen vergleichen
+    pred_home = pred.get("home_team", "").lower()
+    pred_away = pred.get("away_team", "").lower()
+    score_home = score_entry.get("home_team", "").lower()
+    score_away = score_entry.get("away_team", "").lower()
+
+    # Exakter Match
+    if pred_home == score_home and pred_away == score_away:
+        return True
+
+    # Fuzzy-Matching: mindestens einer der Teamnamen muss matchen
+    home_match = get_close_matches(pred_home, [score_home], n=1, cutoff=cutoff)
+    away_match = get_close_matches(pred_away, [score_away], n=1, cutoff=cutoff)
+
+    if home_match and away_match:
+        return True
+
+    # Datum prüfen (gleicher Tag) — beide Teams muessen fuzzy matchen,
+    # um False Positives bei Doppelspieltagen zu vermeiden
+    pred_date = pred.get("commence_time", "")[:10]
+    score_date = score_entry.get("commence_time", "")[:10]
+    if pred_date and score_date and pred_date == score_date:
+        # Mit niedrigerem Cutoff nochmal versuchen wenn Datum stimmt
+        home_loose = get_close_matches(pred_home, [score_home], n=1, cutoff=0.6)
+        away_loose = get_close_matches(pred_away, [score_away], n=1, cutoff=0.6)
+        if home_loose and away_loose:
+            return True
+
+    return False
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # ÖFFENTLICHE API
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def init_db(db_path: Path = DB_PATH) -> None:
+def init_db(db_path: Path | None = None) -> None:
     """Erstellt die Datenbank und alle Tabellen/Indizes falls nicht vorhanden."""
     global DB_PATH
-    DB_PATH = db_path
+    if db_path is not None:
+        DB_PATH = db_path
     with _connect() as conn:
         conn.executescript(_SCHEMA)
     print(f"[Backtesting] DB initialisiert: {DB_PATH}")
@@ -396,6 +460,7 @@ def get_open_predictions() -> list[dict]:
     """
     Gibt alle Vorhersagen zurück, bei denen:
     - bet_won IS NULL  (Ergebnis noch nicht eingetragen)
+    - actual_outcome != 'void'  (nicht abgesagt)
     - commence_time < jetzt  (Spiel müsste bereits abgeschlossen sein)
 
     Returns:
@@ -409,10 +474,30 @@ def get_open_predictions() -> list[dict]:
             FROM predictions p
             JOIN scan_runs s ON s.id = p.run_id
             WHERE p.bet_won IS NULL
+              AND (p.actual_outcome IS NULL OR p.actual_outcome != 'void')
               AND p.commence_time < ?
             ORDER BY p.commence_time
             """,
             (now,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_stale_predictions(days: int = 7) -> list[dict]:
+    """Gibt Predictions zurück, die älter als `days` Tage sind und kein Ergebnis haben."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT p.*, s.scanned_at, s.model_version
+            FROM predictions p
+            JOIN scan_runs s ON s.id = p.run_id
+            WHERE p.bet_won IS NULL
+              AND (p.actual_outcome IS NULL OR p.actual_outcome != 'void')
+              AND p.commence_time < ?
+            ORDER BY p.commence_time
+            """,
+            (cutoff,),
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -446,6 +531,12 @@ def update_result(
             raise ValueError(f"Prediction {prediction_id} nicht gefunden")
 
         row = dict(row)
+
+        if row["bet_won"] is not None:
+            raise ValueError(
+                f"Prediction {prediction_id} wurde bereits aufgelöst "
+                f"(bet_won={row['bet_won']}, {row['home_score']}:{row['away_score']})"
+            )
 
         # actual_outcome bestimmen
         bet_type     = row["bet_type"]
@@ -518,6 +609,43 @@ def update_result(
     }
 
 
+def void_prediction(prediction_id: int) -> dict:
+    """Markiert eine Prediction als void (Spiel ausgefallen/verschoben)."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT id, home_team, away_team, bet_won, actual_outcome FROM predictions WHERE id = ?",
+            (prediction_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Prediction {prediction_id} nicht gefunden")
+        if row["bet_won"] is not None:
+            raise ValueError(
+                f"Prediction {prediction_id} wurde bereits aufgelöst (bet_won={row['bet_won']})"
+            )
+
+        fetched_at = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            """
+            UPDATE predictions SET
+                result_fetched_at = ?,
+                actual_outcome    = 'void',
+                bet_won           = NULL,
+                pnl_units         = 0.0
+            WHERE id = ?
+            """,
+            (fetched_at, prediction_id),
+        )
+
+    row = dict(row)
+    return {
+        "prediction_id": prediction_id,
+        "home_team": row["home_team"],
+        "away_team": row["away_team"],
+        "actual_outcome": "void",
+        "pnl_units": 0.0,
+    }
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # ERGEBNISSE AUFLÖSEN
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -537,25 +665,37 @@ def _load_api_key() -> str:
     return ""
 
 
+def _extract_scores(entry: dict) -> tuple[int | None, int | None]:
+    """Extrahiert home_score und away_score aus einem Scores-API-Eintrag."""
+    home_name = entry.get("home_team", "")
+    away_name = entry.get("away_team", "")
+    home_score: int | None = None
+    away_score: int | None = None
+    for s in (entry.get("scores") or []):
+        try:
+            val = int(s["score"])
+        except (ValueError, KeyError, TypeError):
+            continue
+        if s.get("name") == home_name:
+            home_score = val
+        elif s.get("name") == away_name:
+            away_score = val
+    return home_score, away_score
+
+
 def resolve_results(api_key: str | None = None) -> dict:
     """
     Ruft The Odds API /scores auf und trägt Ergebnisse für offene Vorhersagen ein.
 
-    Ablauf:
-        1. get_open_predictions() → alle Bets ohne Ergebnis, deren Anpfiff bereits war
-        2. Gruppierung nach sport_key, dann odds_api_match_id
-        3. Pro sport_key: GET /v4/sports/{sport_key}/scores?daysFrom=3
-        4. Completed matches → update_result()
-        5. Ausgabe: "Resolved: X bets | Still open: Y bets"
-
-    Args:
-        api_key: The Odds API Key. Wird aus ~/.stock_scanner_credentials geladen
-                 wenn nicht übergeben.
+    Features:
+        - Dynamisches daysFrom basierend auf ältester offener Prediction (max 7)
+        - Retry-Logik mit exponentiellem Backoff (3 Versuche)
+        - Fuzzy-Fallback für Predictions ohne odds_api_match_id
+        - Stale-Warnung für Predictions >7 Tage ohne Ergebnis
 
     Returns:
-        {"resolved": int, "still_open": int}
+        {"resolved": int, "still_open": int, "stale": int}
     """
-    import urllib.request
     from collections import defaultdict
 
     if api_key is None:
@@ -563,42 +703,68 @@ def resolve_results(api_key: str | None = None) -> dict:
 
     if not api_key:
         print("[Backtesting] resolve_results: kein ODDS_API_KEY – übersprungen")
-        return {"resolved": 0, "still_open": 0}
+        return {"resolved": 0, "still_open": 0, "stale": 0}
 
     open_preds = get_open_predictions()
     if not open_preds:
         print("[Backtesting] Keine offenen Vorhersagen zum Auflösen.")
-        return {"resolved": 0, "still_open": 0}
+        return {"resolved": 0, "still_open": 0, "stale": 0}
 
     print(f"[Backtesting] {len(open_preds)} offene Vorhersagen – löse Ergebnisse auf …")
 
+    # Dynamisches daysFrom: älteste offene Prediction bestimmt Lookback
+    now = datetime.now(timezone.utc)
+    oldest_commence = min(
+        (p.get("commence_time", "") for p in open_preds),
+        default=""
+    )
+    if oldest_commence:
+        try:
+            oldest_dt = datetime.fromisoformat(oldest_commence.replace("Z", "+00:00"))
+            days_diff = (now - oldest_dt).days
+            days_from = min(max(days_diff, 3), 7)
+        except (ValueError, TypeError):
+            days_from = 3
+    else:
+        days_from = 3
+
+    print(f"[Backtesting] daysFrom={days_from} (basierend auf ältester offener Prediction)")
+
     # Gruppieren: sport_key → match_id → [predictions]
+    # Separat: Predictions ohne Match-ID für Fuzzy-Fallback
     by_sport: dict[str, dict[str, list[dict]]] = defaultdict(lambda: defaultdict(list))
-    no_id_count = 0
+    no_id_by_sport: dict[str, list[dict]] = defaultdict(list)
     for p in open_preds:
         if p.get("odds_api_match_id"):
             by_sport[p["sport_key"]][p["odds_api_match_id"]].append(p)
         else:
-            no_id_count += 1
+            no_id_by_sport[p["sport_key"]].append(p)
+
+    # Alle sport_keys sammeln (mit und ohne Match-ID)
+    all_sport_keys = set(by_sport.keys()) | set(no_id_by_sport.keys())
 
     resolved   = 0
-    still_open = no_id_count  # Bets ohne Match-ID können nie automatisch aufgelöst werden
+    still_open = 0
 
-    for sport_key, match_map in by_sport.items():
+    for sport_key in all_sport_keys:
+        match_map = by_sport.get(sport_key, {})
+        no_id_preds = no_id_by_sport.get(sport_key, [])
+
         url = (
             f"https://api.the-odds-api.com/v4/sports/{sport_key}/scores"
-            f"?apiKey={api_key}&daysFrom=3"
+            f"?apiKey={api_key}&daysFrom={days_from}"
         )
         try:
-            with urllib.request.urlopen(url, timeout=15) as resp:
-                scores_data: list[dict] = json.loads(resp.read().decode())
+            scores_data = _fetch_with_retry(url)
         except Exception as e:
             print(f"[Backtesting] Scores-API Fehler ({sport_key}): {e} – übersprungen")
-            still_open += sum(len(v) for v in match_map.values())
+            still_open += sum(len(v) for v in match_map.values()) + len(no_id_preds)
             continue
 
         scores_by_id: dict[str, dict] = {s["id"]: s for s in scores_data}
+        completed_scores = [s for s in scores_data if s.get("completed")]
 
+        # 1. Reguläre Auflösung via Match-ID
         for match_id, preds in match_map.items():
             entry = scores_by_id.get(match_id)
 
@@ -606,21 +772,7 @@ def resolve_results(api_key: str | None = None) -> dict:
                 still_open += len(preds)
                 continue
 
-            # Scores extrahieren
-            home_name = entry.get("home_team", "")
-            away_name = entry.get("away_team", "")
-            home_score: int | None = None
-            away_score: int | None = None
-            for s in (entry.get("scores") or []):
-                try:
-                    val = int(s["score"])
-                except (ValueError, KeyError, TypeError):
-                    continue
-                if s.get("name") == home_name:
-                    home_score = val
-                elif s.get("name") == away_name:
-                    away_score = val
-
+            home_score, away_score = _extract_scores(entry)
             if home_score is None or away_score is None:
                 still_open += len(preds)
                 continue
@@ -640,8 +792,54 @@ def resolve_results(api_key: str | None = None) -> dict:
                     print(f"[Backtesting] update_result Fehler (ID {p['id']}): {e}")
                     still_open += 1
 
-    print(f"[Backtesting] Resolved: {resolved} bets | Still open: {still_open} bets")
-    return {"resolved": resolved, "still_open": still_open}
+        # 2. Fuzzy-Fallback für Predictions ohne Match-ID
+        for p in no_id_preds:
+            matched = False
+            for entry in completed_scores:
+                if _fuzzy_match_score(p, entry):
+                    home_score, away_score = _extract_scores(entry)
+                    if home_score is None or away_score is None:
+                        continue
+                    try:
+                        result = update_result(p["id"], home_score, away_score)
+                        resolved += 1
+                        matched = True
+                        icon    = "✓" if result["bet_won"] == 1 else ("✗" if result["bet_won"] == 0 else "~")
+                        pnl     = result["pnl_units"]
+                        pnl_str = f"{pnl:+.2f}u" if pnl is not None else "n/a"
+                        print(
+                            f"[Backtesting] {icon} {p['home_team']} – {p['away_team']} "
+                            f"{home_score}:{away_score}  → {p['tip']}  PnL {pnl_str}  (Fuzzy-Match)"
+                        )
+                        break
+                    except Exception as e:
+                        print(f"[Backtesting] update_result Fehler (ID {p['id']}): {e}")
+                        still_open += 1
+                        matched = True
+                        break
+            if not matched:
+                still_open += 1
+
+    # Stale-Warnung
+    stale_preds = get_stale_predictions(days=7)
+    stale_count = len(stale_preds)
+    if stale_count > 0:
+        print(f"\n[Backtesting] ⚠ {stale_count} Predictions sind >7 Tage alt ohne Ergebnis:")
+        for p in stale_preds[:5]:
+            age_days = (now - datetime.fromisoformat(
+                p["commence_time"].replace("Z", "+00:00")
+            )).days
+            print(
+                f"  [{p['id']:4d}] {p['commence_time'][:10]}  "
+                f"{p['home_team']} – {p['away_team']}  ({age_days} Tage alt)"
+            )
+        if stale_count > 5:
+            print(f"  … und {stale_count - 5} weitere. Nutze: python3 backtesting.py stale")
+        print("  → Manuell auflösen: python3 backtesting.py manual <id> <heim> <gast>")
+        print("  → Spiel void:       python3 backtesting.py void <id>")
+
+    print(f"\n[Backtesting] Resolved: {resolved} bets | Still open: {still_open} bets | Stale: {stale_count}")
+    return {"resolved": resolved, "still_open": still_open, "stale": stale_count}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -650,11 +848,11 @@ def resolve_results(api_key: str | None = None) -> dict:
 
 def get_summary() -> dict:
     """
-    Gibt eine Zusammenfassung aller abgeschlossenen Bets zurück.
+    Gibt eine umfassende Zusammenfassung aller abgeschlossenen Bets zurück.
 
     Returns:
-        dict mit roi_pct, total_bets, won, lost, total_pnl, avg_edge,
-        aufgeteilt nach model_source und sport_key
+        dict mit overall, by_model, by_sport, calibration,
+        daily_pnl, rolling, odds_range, edge_calibration
     """
     with _connect() as conn:
         overall = conn.execute("""
@@ -664,9 +862,12 @@ def get_summary() -> dict:
                 SUM(CASE WHEN bet_won = 0 THEN 1 ELSE 0 END) AS lost,
                 ROUND(SUM(pnl_units), 4)                    AS total_pnl,
                 ROUND(AVG(edge_pct), 2)                     AS avg_edge_pct,
+                ROUND(AVG(best_odds), 2)                    AS avg_odds,
                 ROUND(
                     100.0 * SUM(pnl_units) / NULLIF(SUM(stake_units), 0), 2
-                )                                           AS roi_pct
+                )                                           AS roi_pct,
+                MIN(commence_time)                          AS first_bet,
+                MAX(commence_time)                          AS last_bet
             FROM predictions
             WHERE bet_won IS NOT NULL
         """).fetchone()
@@ -713,17 +914,136 @@ def get_summary() -> dict:
             ORDER BY prob_bucket
         """).fetchall()
 
+        # Zeitreihen-PnL: kumulativ pro Tag
+        daily_pnl = conn.execute("""
+            SELECT
+                SUBSTR(commence_time, 1, 10)               AS day,
+                COUNT(*)                                    AS bets,
+                SUM(CASE WHEN bet_won = 1 THEN 1 ELSE 0 END) AS won,
+                ROUND(SUM(pnl_units), 4)                    AS day_pnl
+            FROM predictions
+            WHERE bet_won IS NOT NULL
+            GROUP BY day
+            ORDER BY day
+        """).fetchall()
+
+        # Odds-Range-Analyse
+        odds_range = conn.execute("""
+            SELECT
+                CASE
+                    WHEN best_odds < 1.5 THEN '1.0-1.5'
+                    WHEN best_odds < 2.0 THEN '1.5-2.0'
+                    WHEN best_odds < 3.0 THEN '2.0-3.0'
+                    WHEN best_odds < 5.0 THEN '3.0-5.0'
+                    ELSE '5.0+'
+                END                                         AS odds_bucket,
+                COUNT(*)                                    AS bets,
+                SUM(CASE WHEN bet_won = 1 THEN 1 ELSE 0 END) AS won,
+                ROUND(SUM(pnl_units), 4)                    AS pnl,
+                ROUND(
+                    100.0 * SUM(pnl_units) / NULLIF(SUM(stake_units), 0), 2
+                )                                           AS roi_pct
+            FROM predictions
+            WHERE bet_won IS NOT NULL
+            GROUP BY odds_bucket
+            ORDER BY MIN(best_odds)
+        """).fetchall()
+
+        # Edge-Kalibrierung
+        edge_calibration = conn.execute("""
+            SELECT
+                CASE
+                    WHEN edge_pct < 5.0  THEN '3-5%'
+                    WHEN edge_pct < 10.0 THEN '5-10%'
+                    WHEN edge_pct < 20.0 THEN '10-20%'
+                    ELSE '20%+'
+                END                                         AS edge_bucket,
+                COUNT(*)                                    AS bets,
+                ROUND(AVG(edge_pct), 1)                     AS avg_edge,
+                ROUND(
+                    100.0 * SUM(pnl_units) / NULLIF(SUM(stake_units), 0), 2
+                )                                           AS actual_roi_pct,
+                SUM(CASE WHEN bet_won = 1 THEN 1 ELSE 0 END) AS won
+            FROM predictions
+            WHERE bet_won IS NOT NULL
+            GROUP BY edge_bucket
+            ORDER BY MIN(edge_pct)
+        """).fetchall()
+
+        # Rolling Metriken: letzte 7 und 30 Tage
+        rolling = {}
+        for label, days in [("7d", 7), ("30d", 30)]:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+            row = conn.execute("""
+                SELECT
+                    COUNT(*)                                      AS bets,
+                    SUM(CASE WHEN bet_won = 1 THEN 1 ELSE 0 END) AS won,
+                    ROUND(SUM(pnl_units), 4)                      AS pnl,
+                    ROUND(
+                        100.0 * SUM(pnl_units) / NULLIF(SUM(stake_units), 0), 2
+                    )                                             AS roi_pct
+                FROM predictions
+                WHERE bet_won IS NOT NULL
+                  AND commence_time >= ?
+            """, (cutoff,)).fetchone()
+            rolling[label] = dict(row) if row else {}
+
+        # Aktuelle Serie (Siege/Niederlagen in Folge)
+        streak_rows = conn.execute("""
+            SELECT bet_won
+            FROM predictions
+            WHERE bet_won IS NOT NULL
+            ORDER BY commence_time DESC, id DESC
+            LIMIT 50
+        """).fetchall()
+        streak_type = None
+        streak_count = 0
+        for r in streak_rows:
+            if streak_type is None:
+                streak_type = r["bet_won"]
+                streak_count = 1
+            elif r["bet_won"] == streak_type:
+                streak_count += 1
+            else:
+                break
+        rolling["streak"] = {
+            "type": "W" if streak_type == 1 else ("L" if streak_type == 0 else "—"),
+            "count": streak_count,
+        }
+
     return {
-        "overall":     dict(overall) if overall else {},
-        "by_model":    [dict(r) for r in by_model],
-        "by_sport":    [dict(r) for r in by_sport],
-        "calibration": [dict(r) for r in calibration],
+        "overall":          dict(overall) if overall else {},
+        "by_model":         [dict(r) for r in by_model],
+        "by_sport":         [dict(r) for r in by_sport],
+        "calibration":      [dict(r) for r in calibration],
+        "daily_pnl":        [dict(r) for r in daily_pnl],
+        "odds_range":       [dict(r) for r in odds_range],
+        "edge_calibration": [dict(r) for r in edge_calibration],
+        "rolling":          rolling,
     }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# CLI — python3 backtesting.py [summary | open]
+# CLI — python3 backtesting.py [summary|open|resolve|stale|manual|void]
 # ═══════════════════════════════════════════════════════════════════════════════
+
+def _print_table(headers: list[str], rows: list[list[str]], indent: int = 2) -> None:
+    """Druckt eine formatierte Tabelle."""
+    n_cols = len(headers)
+    widths = [len(h) for h in headers]
+    for row in rows:
+        for i in range(min(len(row), n_cols)):
+            widths[i] = max(widths[i], len(str(row[i])))
+
+    prefix = " " * indent
+    header_line = prefix + "  ".join(h.ljust(widths[i]) for i, h in enumerate(headers))
+    sep_line = prefix + "  ".join("─" * w for w in widths)
+
+    print(header_line)
+    print(sep_line)
+    for row in rows:
+        print(prefix + "  ".join(str(cell).ljust(widths[i]) for i, cell in enumerate(row)))
+
 
 if __name__ == "__main__":
     import sys
@@ -746,6 +1066,59 @@ if __name__ == "__main__":
                     f"Edge {p['edge_pct']:.1f}%  [{p['sport_key']}]"
                 )
 
+    elif cmd == "stale":
+        preds = get_stale_predictions(days=7)
+        if not preds:
+            print("Keine stale Predictions (>7 Tage ohne Ergebnis).")
+        else:
+            now = datetime.now(timezone.utc)
+            print(f"\n{len(preds)} stale Predictions (>7 Tage ohne Ergebnis):\n")
+            for p in preds:
+                try:
+                    age_days = (now - datetime.fromisoformat(
+                        p["commence_time"].replace("Z", "+00:00")
+                    )).days
+                except (ValueError, TypeError):
+                    age_days = "?"
+                has_id = "✓" if p.get("odds_api_match_id") else "✗"
+                print(
+                    f"  [{p['id']:4d}] {p['commence_time'][:10]}  "
+                    f"{p['home_team']} – {p['away_team']}  "
+                    f"→ {p['tip']} @ {p['best_odds']:.2f}  "
+                    f"({age_days}d)  Match-ID: {has_id}"
+                )
+            print(f"\n  Manuell auflösen: python3 backtesting.py manual <id> <heim_score> <gast_score>")
+            print(f"  Void markieren:   python3 backtesting.py void <id>")
+
+    elif cmd == "manual":
+        if len(sys.argv) < 5:
+            print("Verwendung: python3 backtesting.py manual <prediction_id> <home_score> <away_score>")
+            sys.exit(1)
+        try:
+            pred_id = int(sys.argv[2])
+            h_score = int(sys.argv[3])
+            a_score = int(sys.argv[4])
+        except ValueError:
+            print("Fehler: prediction_id, home_score und away_score müssen Ganzzahlen sein.")
+            sys.exit(1)
+        result = update_result(pred_id, h_score, a_score)
+        icon = "✓" if result["bet_won"] == 1 else ("✗" if result["bet_won"] == 0 else "~")
+        pnl = result["pnl_units"]
+        pnl_str = f"{pnl:+.2f}u" if pnl is not None else "n/a"
+        print(f"{icon} Prediction {pred_id}: {h_score}:{a_score} → {result['actual_outcome']}  PnL {pnl_str}")
+
+    elif cmd == "void":
+        if len(sys.argv) < 3:
+            print("Verwendung: python3 backtesting.py void <prediction_id>")
+            sys.exit(1)
+        try:
+            pred_id = int(sys.argv[2])
+        except ValueError:
+            print("Fehler: prediction_id muss eine Ganzzahl sein.")
+            sys.exit(1)
+        result = void_prediction(pred_id)
+        print(f"~ Prediction {pred_id} als void markiert: {result['home_team']} – {result['away_team']}  PnL 0.00u")
+
     elif cmd == "summary":
         s = get_summary()
         o = s["overall"]
@@ -753,38 +1126,146 @@ if __name__ == "__main__":
             print("Noch keine abgeschlossenen Bets in der DB.")
             sys.exit(0)
 
-        print(f"\n{'='*55}")
-        print(f"  Backtesting Summary")
-        print(f"{'='*55}")
+        W = 60
+        print(f"\n{'═' * W}")
+        print(f"  BACKTESTING SUMMARY")
+        print(f"{'═' * W}")
+
+        # Zeitraum
+        first = (o.get("first_bet") or "")[:10]
+        last = (o.get("last_bet") or "")[:10]
+        print(f"  Zeitraum    : {first} bis {last}")
         print(f"  Bets gesamt : {o['total_bets']}")
-        print(f"  Gewonnen    : {o['won']}  |  Verloren: {o['lost']}")
+        print(f"  Gewonnen    : {o['won']}  |  Verloren: {o['lost']}  "
+              f"({100 * o['won'] / o['total_bets']:.0f}% Trefferquote)")
         print(f"  PnL (Units) : {o['total_pnl']:+.2f}")
         print(f"  ROI         : {o['roi_pct']:+.2f}%")
         print(f"  Ø Edge      : {o['avg_edge_pct']:.1f}%")
+        print(f"  Ø Quote     : {o.get('avg_odds', 0):.2f}")
 
-        print(f"\n  Nach Modell:")
-        for r in s["by_model"]:
-            print(f"    {r['model_source']:<12} {r['bets']:3d} Bets  "
-                  f"PnL {r['pnl']:+.2f}  ROI {r['roi_pct']:+.1f}%")
+        # Rolling
+        rolling = s.get("rolling", {})
+        streak = rolling.get("streak", {})
+        print(f"\n{'─' * W}")
+        print(f"  ROLLING METRIKEN")
+        print(f"{'─' * W}")
+        for label in ["7d", "30d"]:
+            r = rolling.get(label, {})
+            if r.get("bets"):
+                print(f"  Letzte {label:>3}: {r['bets']:3d} Bets  "
+                      f"PnL {r['pnl']:+.2f}  ROI {r['roi_pct']:+.1f}%  "
+                      f"({r['won']}/{r['bets']} gewonnen)")
+            else:
+                print(f"  Letzte {label:>3}: keine Daten")
+        if streak.get("count"):
+            print(f"  Serie      : {streak['count']}× {streak['type']}")
 
-        print(f"\n  Nach Liga:")
-        for r in s["by_sport"]:
-            print(f"    {r['sport_key']:<40} {r['bets']:3d} Bets  "
-                  f"PnL {r['pnl']:+.2f}  ROI {r['roi_pct']:+.1f}%")
+        # Nach Modell
+        print(f"\n{'─' * W}")
+        print(f"  NACH MODELL")
+        print(f"{'─' * W}")
+        _print_table(
+            ["Modell", "Bets", "Won", "PnL", "ROI"],
+            [[r['model_source'], str(r['bets']), str(r['won']),
+              f"{r['pnl']:+.2f}", f"{r['roi_pct']:+.1f}%"]
+             for r in s["by_model"]],
+        )
 
-        print(f"\n  Kalibrierung (Modell-Prob vs. Trefferquote):")
-        print(f"  {'Bucket':>8}  {'Bets':>5}  {'Modell':>8}  {'Tatsächlich':>11}")
-        for r in s["calibration"]:
-            diff = (r["actual_win_rate"] or 0) - (r["avg_model_prob"] or 0)
-            flag = " ↑" if diff > 0.05 else (" ↓" if diff < -0.05 else "")
-            print(f"  {r['prob_bucket']:>7.0%}  {r['bets']:>5d}  "
-                  f"{r['avg_model_prob']:>7.1%}  {r['actual_win_rate'] or 0:>10.1%}{flag}")
+        # Nach Liga
+        print(f"\n{'─' * W}")
+        print(f"  NACH LIGA")
+        print(f"{'─' * W}")
+        _print_table(
+            ["Liga", "Bets", "Won", "PnL", "ROI"],
+            [[r['sport_key'], str(r['bets']), str(r['won']),
+              f"{r['pnl']:+.2f}", f"{r['roi_pct']:+.1f}%"]
+             for r in s["by_sport"]],
+        )
+
+        # Odds-Range
+        if s.get("odds_range"):
+            print(f"\n{'─' * W}")
+            print(f"  NACH QUOTEN-RANGE")
+            print(f"{'─' * W}")
+            _print_table(
+                ["Range", "Bets", "Won", "PnL", "ROI"],
+                [[r['odds_bucket'], str(r['bets']), str(r['won']),
+                  f"{r['pnl']:+.2f}", f"{r['roi_pct']:+.1f}%"]
+                 for r in s["odds_range"]],
+            )
+
+        # Edge-Kalibrierung
+        if s.get("edge_calibration"):
+            print(f"\n{'─' * W}")
+            print(f"  EDGE-KALIBRIERUNG (vorhergesagt vs. tatsächlich)")
+            print(f"{'─' * W}")
+            _print_table(
+                ["Edge", "Bets", "Ø Edge", "Tats. ROI", "Delta"],
+                [[r['edge_bucket'], str(r['bets']),
+                  f"{r['avg_edge']:.1f}%",
+                  f"{r['actual_roi_pct']:+.1f}%",
+                  f"{(r['actual_roi_pct'] or 0) - (r['avg_edge'] or 0):+.1f}%"]
+                 for r in s["edge_calibration"]],
+            )
+
+        # Modell-Kalibrierung
+        print(f"\n{'─' * W}")
+        print(f"  MODELL-KALIBRIERUNG (Wahrscheinlichkeit vs. Trefferquote)")
+        print(f"{'─' * W}")
+        _print_table(
+            ["Bucket", "Bets", "Modell", "Tatsächlich", "Diff"],
+            [[f"{r['prob_bucket']:.0%}", str(r['bets']),
+              f"{r['avg_model_prob']:.1%}",
+              f"{r['actual_win_rate'] or 0:.1%}",
+              f"{((r['actual_win_rate'] or 0) - (r['avg_model_prob'] or 0)):+.1%}"
+              + (" ↑" if ((r['actual_win_rate'] or 0) - (r['avg_model_prob'] or 0)) > 0.05
+                 else (" ↓" if ((r['actual_win_rate'] or 0) - (r['avg_model_prob'] or 0)) < -0.05 else ""))]
+             for r in s["calibration"]],
+        )
+
+        # Zeitreihe (letzte 10 Tage)
+        daily = s.get("daily_pnl", [])
+        if daily:
+            print(f"\n{'─' * W}")
+            print(f"  PnL-ZEITREIHE (letzte {min(len(daily), 10)} Tage)")
+            print(f"{'─' * W}")
+            cumulative = 0.0
+            rows = []
+            for d in daily:
+                cumulative += d["day_pnl"] or 0
+                rows.append([d["day"], str(d["bets"]),
+                             f"{d['won']}/{d['bets']}",
+                             f"{d['day_pnl']:+.2f}",
+                             f"{cumulative:+.2f}"])
+            _print_table(
+                ["Tag", "Bets", "W/L", "Tag-PnL", "Kumulativ"],
+                rows[-10:],
+            )
+
+        # Offene Bets Hinweis
+        open_count = len(get_open_predictions())
+        stale_count = len(get_stale_predictions())
+        if open_count or stale_count:
+            print(f"\n{'─' * W}")
+            if open_count:
+                print(f"  📋 {open_count} offene Bets → python3 backtesting.py open")
+            if stale_count:
+                print(f"  ⚠ {stale_count} stale Bets (>7d) → python3 backtesting.py stale")
+
+        print(f"\n{'═' * W}")
 
     elif cmd == "resolve":
         result = resolve_results()
-        print(f"Resolved: {result['resolved']} | Still open: {result['still_open']}")
+        print(f"Resolved: {result['resolved']} | Still open: {result['still_open']} | Stale: {result.get('stale', 0)}")
 
     else:
         print(f"Unbekannter Befehl: {cmd}")
-        print("Verwendung: python3 backtesting.py [summary|open|resolve]")
+        print("Verwendung: python3 backtesting.py [summary|open|resolve|stale|manual|void]")
+        print()
+        print("  summary                        — Gesamtauswertung")
+        print("  open                           — Offene Predictions anzeigen")
+        print("  resolve                        — Ergebnisse via API auflösen")
+        print("  stale                          — Predictions >7 Tage ohne Ergebnis")
+        print("  manual <id> <heim> <gast>      — Manuelles Ergebnis eintragen")
+        print("  void <id>                      — Spiel als ausgefallen markieren")
         sys.exit(1)

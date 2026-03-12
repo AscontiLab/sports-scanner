@@ -17,6 +17,7 @@ import sys
 import argparse
 import json
 import math
+import time
 import difflib
 import warnings
 import requests
@@ -27,7 +28,8 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from scipy.stats import poisson
 from scipy.optimize import minimize
-from backtesting import init_db, log_scan_run, log_prediction, resolve_results
+from backtesting import init_db, log_scan_run, log_prediction, resolve_results, get_summary
+from alerts import send_high_edge_alerts
 
 import subprocess
 
@@ -46,6 +48,9 @@ FOOTBALL_SPORTS = [
     "soccer_germany_bundesliga2",
     "soccer_germany_liga3",
     "soccer_epl",
+    "soccer_spain_la_liga",
+    "soccer_italy_serie_a",
+    "soccer_france_ligue_one",
 ]
 
 SPORT_LABELS = {
@@ -54,13 +59,19 @@ SPORT_LABELS = {
     "soccer_germany_liga3":            "3. Liga",
     "soccer_germany_dfb_pokal":        "DFB-Pokal",
     "soccer_epl":                      "Premier League",
+    "soccer_spain_la_liga":            "La Liga",
+    "soccer_italy_serie_a":            "Serie A",
+    "soccer_france_ligue_one":         "Ligue 1",
 }
 
 # football-data.co.uk URLs (D1/D2 = Standardformat)
 FDCO_LEAGUES = {
     "soccer_germany_bundesliga": "D1",
     "soccer_germany_bundesliga2": "D2",
-    "soccer_england_premier_league": "E0",
+    "soccer_epl": "E0",
+    "soccer_spain_la_liga": "SP1",
+    "soccer_italy_serie_a": "I1",
+    "soccer_france_ligue_one": "F1",
     # 3. Liga kommt von OpenLigaDB (s. load_liga3_data)
 }
 
@@ -89,6 +100,7 @@ UEFA_LABELS = {
     "soccer_uefa_champs_league":            "Champions League",
     "soccer_uefa_europa_league":            "Europa League",
     "soccer_uefa_europa_conference_league": "Conference League",
+    "soccer_germany_dfb_pokal":             "DFB-Pokal",
 }
 
 # Club-Elo API
@@ -108,6 +120,32 @@ EUROPEAN_FDCO_LEAGUES = [
 # Odds API Quota: bei sehr niedrigem Rest nicht weiterziehen
 MIN_ODDS_API_REMAINING = 5
 ODDS_API_REMAINING: int | None = None
+
+# ── KICKTIPP-KONFIGURATION ──────────────────────────────────────────────────
+KICKTIPP_FOOTBALL_SPORTS = [
+    "soccer_germany_bundesliga",
+    "soccer_germany_bundesliga2",
+    "soccer_epl",
+    "soccer_spain_la_liga",
+    "soccer_italy_serie_a",
+    "soccer_france_ligue_one",
+]
+
+KICKTIPP_UEFA_SPORTS = [
+    "soccer_uefa_champs_league",
+    "soccer_uefa_europa_league",
+]
+
+KICKTIPP_LABELS = {
+    "soccer_germany_bundesliga":  "1. Bundesliga",
+    "soccer_germany_bundesliga2": "2. Bundesliga",
+    "soccer_epl":                 "Premier League",
+    "soccer_spain_la_liga":       "La Liga",
+    "soccer_italy_serie_a":       "Serie A",
+    "soccer_france_ligue_one":    "Ligue 1",
+    "soccer_uefa_champs_league":  "Champions League",
+    "soccer_uefa_europa_league":  "Europa League",
+}
 
 
 def current_season_codes(now: datetime | None = None) -> list[str]:
@@ -142,6 +180,31 @@ def get_elo_years(now: datetime | None = None, span: int = 4) -> list[int]:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# RETRY-LOGIK
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _request_with_retry(url: str, params: dict | None = None,
+                        retries: int = 3, backoff: list | None = None,
+                        timeout: int = 30, **kwargs) -> requests.Response:
+    """HTTP GET mit Retry-Logik und exponentiellem Backoff."""
+    if backoff is None:
+        backoff = [2, 4, 8]
+    last_error = None
+    for attempt in range(retries):
+        try:
+            r = requests.get(url, params=params, timeout=timeout, **kwargs)
+            r.raise_for_status()
+            return r
+        except Exception as e:
+            last_error = e
+            if attempt < retries - 1:
+                wait = backoff[min(attempt, len(backoff) - 1)]
+                print(f"    Retry ({attempt + 1}/{retries}): {e} – warte {wait}s …")
+                time.sleep(wait)
+    raise last_error
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # CREDENTIALS
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -172,9 +235,8 @@ ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 
 
 def get_active_sports(api_key: str) -> list:
-    r = requests.get(f"{ODDS_API_BASE}/sports",
-                     params={"apiKey": api_key}, timeout=15)
-    r.raise_for_status()
+    r = _request_with_retry(f"{ODDS_API_BASE}/sports",
+                            params={"apiKey": api_key}, timeout=15)
     return r.json()
 
 
@@ -186,20 +248,30 @@ def get_odds(api_key: str, sport_key: str, markets: str = "h2h,totals") -> list:
         "oddsFormat": "decimal",
         "dateFormat": "iso",
     }
-    r = requests.get(f"{ODDS_API_BASE}/sports/{sport_key}/odds",
-                     params=params, timeout=20)
-    if r.status_code == 404:
-        return []
-    r.raise_for_status()
-    remaining = r.headers.get("x-requests-remaining", "?")
-    try:
-        remaining_int = int(remaining)
-    except Exception:
-        remaining_int = None
-    global ODDS_API_REMAINING
-    ODDS_API_REMAINING = remaining_int
-    print(f"    → {len(r.json())} Matches | API-Requests verbleibend: {remaining}")
-    return r.json()
+    last_error = None
+    for attempt in range(3):
+        try:
+            r = requests.get(f"{ODDS_API_BASE}/sports/{sport_key}/odds",
+                             params=params, timeout=20)
+            if r.status_code == 404:
+                return []
+            r.raise_for_status()
+            remaining = r.headers.get("x-requests-remaining", "?")
+            try:
+                remaining_int = int(remaining)
+            except Exception:
+                remaining_int = None
+            global ODDS_API_REMAINING
+            ODDS_API_REMAINING = remaining_int
+            print(f"    → {len(r.json())} Matches | API-Requests verbleibend: {remaining}")
+            return r.json()
+        except Exception as e:
+            last_error = e
+            if attempt < 2:
+                wait = [2, 4][attempt]
+                print(f"    Retry ({attempt + 1}/3): {e} – warte {wait}s …")
+                time.sleep(wait)
+    raise last_error
 
 
 def best_odds_from_match(match: dict) -> dict:
@@ -285,8 +357,7 @@ def download_clubelo(date: str) -> dict:
     """
     for url in [CLUBELO_URL_HTTPS.format(date=date), CLUBELO_URL_HTTP.format(date=date)]:
         try:
-            r = requests.get(url, timeout=20)
-            r.raise_for_status()
+            r = _request_with_retry(url, timeout=20)
             df = pd.read_csv(StringIO(r.text))
             result = {}
             for _, row in df.iterrows():
@@ -323,8 +394,7 @@ def download_clubelo_with_fallback(max_days_back: int = 3) -> tuple[str, dict]:
 
 def download_fdco(url: str) -> pd.DataFrame | None:
     try:
-        r = requests.get(url, timeout=30)
-        r.raise_for_status()
+        r = _request_with_retry(url, timeout=30)
         df = pd.read_csv(StringIO(r.text), encoding="latin-1")
         return df
     except Exception as e:
@@ -357,8 +427,7 @@ def load_liga3_data() -> pd.DataFrame | None:
     for season in seasons:
         url = f"{OPENLIGADB_BASE}/getmatchdata/bl3/{season}"
         try:
-            r = requests.get(url, timeout=30)
-            r.raise_for_status()
+            r = _request_with_retry(url, timeout=30)
             matches = r.json()
         except Exception as e:
             print(f"    Warning: OpenLigaDB Saison {season}: {e}")
@@ -443,11 +512,14 @@ def load_european_data() -> pd.DataFrame | None:
 # FOOTBALL: POISSON-MODELL (Dixon-Coles-Stil)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def fit_poisson_model(df: pd.DataFrame) -> dict:
+def fit_poisson_model(df: pd.DataFrame, decay_rate: float = 0.005) -> dict:
     """
     Passt Attack/Defense-Parameter per Maximum-Likelihood an.
     log(λ_heim) = home_adv + attack[heim] – defense[gast]
     log(λ_gast) = attack[gast]            – defense[heim]
+
+    Time-Decay: weight = exp(-decay_rate * days_ago)
+    Halbwertszeit bei decay_rate=0.005 ≈ 140 Tage.
     """
     teams    = sorted(set(df["HomeTeam"]) | set(df["AwayTeam"]))
     n_teams  = len(teams)
@@ -457,6 +529,14 @@ def fit_poisson_model(df: pd.DataFrame) -> dict:
     at = df["AwayTeam"].map(idx).values
     hg = df["FTHG"].values.astype(float)
     ag = df["FTAG"].values.astype(float)
+
+    # Time-Decay Gewichte berechnen
+    weights = np.ones(len(df))
+    if "Date" in df.columns and decay_rate > 0:
+        today = pd.Timestamp.now()
+        dates = pd.to_datetime(df["Date"], errors="coerce", dayfirst=True)
+        days_ago = (today - dates).dt.days.fillna(180).values.astype(float)
+        weights = np.exp(-decay_rate * days_ago)
 
     n_params = 2 * n_teams + 1
     x0       = np.zeros(n_params)
@@ -470,7 +550,7 @@ def fit_poisson_model(df: pd.DataFrame) -> dict:
         la  = np.exp(att[at] - dfs[ht])
         ll  = (hg * np.log(lh + 1e-10) - lh
              + ag * np.log(la + 1e-10) - la)
-        return -np.sum(ll)
+        return -np.sum(weights * ll)
 
     constraints = [{"type": "eq", "fun": lambda x: x[0]}]
     res = minimize(neg_ll, x0, method="SLSQP",
@@ -526,6 +606,18 @@ def predict_ou(lam_home: float, lam_away: float, line: float) -> tuple[float, fl
     p_under = float(poisson.cdf(math.floor(line - 1e-9), lam_total))
     p_over  = 1.0 - p_under
     return p_over, p_under
+
+
+def predict_most_likely_score(lam_home: float, lam_away: float,
+                              max_goals: int = 6) -> tuple[int, int]:
+    """Gibt das wahrscheinlichste (Heim-Tore, Gast-Tore) zurück."""
+    best_p, best_h, best_a = 0.0, 1, 1
+    for h in range(max_goals + 1):
+        for a in range(max_goals + 1):
+            p = poisson.pmf(h, lam_home) * poisson.pmf(a, lam_away)
+            if p > best_p:
+                best_p, best_h, best_a = p, h, a
+    return best_h, best_a
 
 
 def elo_to_football_1x2(elo_home: float, elo_away: float,
@@ -618,13 +710,13 @@ def find_club_elo(name: str, elo_dict: dict) -> float | None:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 ATP_BASE = "https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master"
+WTA_BASE = "https://raw.githubusercontent.com/JeffSackmann/tennis_wta/master"
 
 
 def download_atp_year(year: int) -> pd.DataFrame | None:
     url = f"{ATP_BASE}/atp_matches_{year}.csv"
     try:
-        r = requests.get(url, timeout=30)
-        r.raise_for_status()
+        r = _request_with_retry(url, timeout=30)
         df = pd.read_csv(StringIO(r.text), low_memory=False)
         return df
     except Exception as e:
@@ -632,12 +724,41 @@ def download_atp_year(year: int) -> pd.DataFrame | None:
         return None
 
 
-def compute_tennis_elo(years: list) -> dict:
+# Surface-Mapping für Odds API Turniere → Belag
+TOURNAMENT_SURFACE = {
+    "Australian Open": "Hard", "US Open": "Hard",
+    "French Open": "Clay", "Roland Garros": "Clay",
+    "Wimbledon": "Grass",
+    "Indian Wells": "Hard", "Miami Open": "Hard",
+    "Monte Carlo": "Clay", "Monte-Carlo": "Clay",
+    "Madrid": "Clay", "Rome": "Clay", "Roma": "Clay",
+    "Barcelona": "Clay", "Hamburg": "Clay",
+    "Cincinnati": "Hard", "Shanghai": "Hard",
+    "Canada": "Hard", "Montreal": "Hard", "Toronto": "Hard",
+    "Dubai": "Hard", "Doha": "Hard", "Brisbane": "Hard",
+    "Halle": "Grass", "Queen's": "Grass", "Stuttgart": "Clay",
+    "Basel": "Hard", "Vienna": "Hard", "ATP Finals": "Hard",
+    "WTA Finals": "Hard",
+}
+
+
+def _detect_surface(tournament_name: str) -> str | None:
+    """Erkennt den Belag anhand des Turniernamens."""
+    name_lower = tournament_name.lower()
+    for key, surface in TOURNAMENT_SURFACE.items():
+        if key.lower() in name_lower:
+            return surface
+    return None
+
+
+def compute_tennis_elo(years: list) -> tuple[dict, dict]:
     """
     Berechnet Elo-Ratings aus historischen ATP-Matches.
-    Gibt dict name→elo zurück.
+    Gibt (gesamt_elo, surface_elo) zurück.
+    surface_elo = {"Hard": {name: elo}, "Clay": {...}, "Grass": {...}}
     """
     elo = {}
+    surface_elo = {"Hard": {}, "Clay": {}, "Grass": {}}
     all_frames = []
     for year in years:
         df = download_atp_year(year)
@@ -645,11 +766,70 @@ def compute_tennis_elo(years: list) -> dict:
             all_frames.append(df)
     if not all_frames:
         print("    Warning: Keine ATP-Daten geladen")
-        return {}
+        return {}, surface_elo
 
     combined = pd.concat(all_frames, ignore_index=True)
     combined = combined.dropna(subset=["winner_name", "loser_name"])
-    # Chronologisch sortieren
+    if "tourney_date" in combined.columns:
+        combined["tourney_date"] = pd.to_numeric(combined["tourney_date"], errors="coerce")
+        combined = combined.sort_values("tourney_date")
+
+    def expected(ra, rb):
+        return 1 / (1 + 10 ** ((rb - ra) / 400))
+
+    for _, row in combined.iterrows():
+        w = str(row["winner_name"]).strip()
+        l = str(row["loser_name"]).strip()
+        if not w or not l:
+            continue
+        # Gesamt-Elo
+        elo.setdefault(w, ELO_INITIAL)
+        elo.setdefault(l, ELO_INITIAL)
+        e_w = expected(elo[w], elo[l])
+        e_l = 1 - e_w
+        elo[w] += ELO_K_FACTOR * (1 - e_w)
+        elo[l] += ELO_K_FACTOR * (0 - e_l)
+        # Surface-Elo
+        surface = str(row.get("surface", "")).strip().capitalize() if pd.notna(row.get("surface")) else None
+        if surface in surface_elo:
+            s_elo = surface_elo[surface]
+            s_elo.setdefault(w, ELO_INITIAL)
+            s_elo.setdefault(l, ELO_INITIAL)
+            se_w = expected(s_elo[w], s_elo[l])
+            se_l = 1 - se_w
+            s_elo[w] += ELO_K_FACTOR * (1 - se_w)
+            s_elo[l] += ELO_K_FACTOR * (0 - se_l)
+
+    return elo, surface_elo
+
+
+def download_wta_year(year: int) -> pd.DataFrame | None:
+    url = f"{WTA_BASE}/wta_matches_{year}.csv"
+    try:
+        r = _request_with_retry(url, timeout=30)
+        df = pd.read_csv(StringIO(r.text), low_memory=False)
+        return df
+    except Exception as e:
+        print(f"    Warning: WTA {year}: {e}")
+        return None
+
+
+def compute_wta_elo(years: list) -> tuple[dict, dict]:
+    """Berechnet Elo-Ratings aus historischen WTA-Matches.
+    Gibt (gesamt_elo, surface_elo) zurück."""
+    elo = {}
+    surface_elo = {"Hard": {}, "Clay": {}, "Grass": {}}
+    all_frames = []
+    for year in years:
+        df = download_wta_year(year)
+        if df is not None and "winner_name" in df.columns:
+            all_frames.append(df)
+    if not all_frames:
+        print("    Warning: Keine WTA-Daten geladen")
+        return {}, surface_elo
+
+    combined = pd.concat(all_frames, ignore_index=True)
+    combined = combined.dropna(subset=["winner_name", "loser_name"])
     if "tourney_date" in combined.columns:
         combined["tourney_date"] = pd.to_numeric(combined["tourney_date"], errors="coerce")
         combined = combined.sort_values("tourney_date")
@@ -668,8 +848,17 @@ def compute_tennis_elo(years: list) -> dict:
         e_l = 1 - e_w
         elo[w] += ELO_K_FACTOR * (1 - e_w)
         elo[l] += ELO_K_FACTOR * (0 - e_l)
+        surface = str(row.get("surface", "")).strip().capitalize() if pd.notna(row.get("surface")) else None
+        if surface in surface_elo:
+            s_elo = surface_elo[surface]
+            s_elo.setdefault(w, ELO_INITIAL)
+            s_elo.setdefault(l, ELO_INITIAL)
+            se_w = expected(s_elo[w], s_elo[l])
+            se_l = 1 - se_w
+            s_elo[w] += ELO_K_FACTOR * (1 - se_w)
+            s_elo[l] += ELO_K_FACTOR * (0 - se_l)
 
-    return elo
+    return elo, surface_elo
 
 
 def predict_tennis_win_prob(elo_a: float, elo_b: float) -> float:
@@ -908,21 +1097,37 @@ def analyze_uefa_match(match: dict, elo_dict: dict,
 # TENNIS ANALYSE
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def analyze_tennis_match(match: dict, tournament: str, elo_dict: dict) -> list:
+def analyze_tennis_match(match: dict, tournament: str,
+                         elo_dict: dict, surface_elo: dict | None = None) -> list:
     p1 = match["home_team"]
     p2 = match["away_team"]
 
-    elo1 = find_player_elo(p1, elo_dict)
-    elo2 = find_player_elo(p2, elo_dict)
+    # Surface-spezifisches Elo bevorzugen
+    surface = _detect_surface(tournament) if surface_elo else None
+    s_elo = surface_elo.get(surface, {}) if surface and surface_elo else {}
+
+    elo1_s = find_player_elo(p1, s_elo) if s_elo else None
+    elo2_s = find_player_elo(p2, s_elo) if s_elo else None
+    elo1_g = find_player_elo(p1, elo_dict)
+    elo2_g = find_player_elo(p2, elo_dict)
+
+    # Surface-Elo verwenden wenn für beide Spieler vorhanden, sonst Gesamt-Elo
+    if elo1_s is not None and elo2_s is not None:
+        elo1, elo2 = elo1_s, elo2_s
+        model_source = f"Elo ({surface})" if surface else "Elo"
+    elif elo1_g is not None and elo2_g is not None:
+        elo1, elo2 = elo1_g, elo2_g
+        model_source = "Elo"
+    else:
+        elo1 = elo2 = None
+        model_source = None
 
     best = best_odds_from_match(match)
     bets = []
 
     if elo1 is not None and elo2 is not None:
-        # Elo-basiertes Modell
         prob1 = predict_tennis_win_prob(elo1, elo2)
         prob2 = 1 - prob1
-        model_source = "Elo"
     else:
         # Fallback: Konsens der Bookies als Modell
         consensus = bookie_consensus(match)
@@ -994,6 +1199,313 @@ tr:hover td { background:#f5f8ff; }
 .footer{ color:#777799; font-size:0.78em; margin-top:30px;
          border-top:1px solid #dde3ed; padding-top:14px; }
 """
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# KICKTIPP: PROGNOSEN SAMMELN + HTML/JSON GENERIEREN
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def collect_kicktipp_predictions(football_models: dict, club_elo_dict: dict,
+                                  euro_model: dict | None,
+                                  loaded_matches: dict) -> list:
+    """
+    Sammelt Kicktipp-Tipps für alle Kicktipp-Ligen.
+    Nutzt bereits geladene Matches (kein erneuter API-Call).
+
+    Fallback-Kette wenn Poisson-Modell fehlschlägt:
+    1. Poisson-Modell → Probs + Score
+    2. Club-Elo → elo_to_football_1x2() für Probs, Durchschnitts-Lambda für Score
+    3. Bookie-Konsens → normalisierte Quoten für Probs
+    """
+    results = []
+
+    # ── Fußball-Ligen via Poisson (+ Fallbacks) ─────────────────────────────
+    for sport_key in KICKTIPP_FOOTBALL_SPORTS:
+        label = KICKTIPP_LABELS.get(sport_key, sport_key)
+        model = football_models.get(sport_key)
+        matches = loaded_matches.get(sport_key, [])
+        print(f"  [Kicktipp] {label}: {len(matches)} Spiele …")
+
+        for match in matches:
+            home_api = match["home_team"]
+            away_api = match["away_team"]
+            kick_off = match.get("commence_time", "")
+
+            p_home = p_draw = p_away = None
+            score_home = score_away = None
+            model_src = None
+
+            # Fallback 1: Poisson-Modell
+            if model:
+                home_model = find_team_in_model(home_api, model["teams"])
+                away_model = find_team_in_model(away_api, model["teams"])
+                if home_model and away_model:
+                    probs = predict_football(home_model, away_model, model)
+                    if probs:
+                        p_home = probs["home"]
+                        p_draw = probs["draw"]
+                        p_away = probs["away"]
+                        score_home, score_away = predict_most_likely_score(
+                            probs["lam_home"], probs["lam_away"]
+                        )
+                        model_src = "Poisson"
+
+            # Fallback 2: Club-Elo
+            if p_home is None and club_elo_dict:
+                elo_home = find_club_elo(home_api, club_elo_dict)
+                elo_away = find_club_elo(away_api, club_elo_dict)
+                if elo_home is not None and elo_away is not None:
+                    p_home, p_draw, p_away = elo_to_football_1x2(elo_home, elo_away)
+                    # Durchschnitts-Lambda für Score-Schätzung
+                    avg_lam_h = 1.4 + 0.3 * (p_home - 0.33)
+                    avg_lam_a = 1.4 + 0.3 * (p_away - 0.33)
+                    score_home, score_away = predict_most_likely_score(avg_lam_h, avg_lam_a)
+                    model_src = "ClubElo"
+
+            # Fallback 3: Bookie-Konsens
+            if p_home is None:
+                consensus = bookie_consensus(match)
+                if consensus and consensus.get("home"):
+                    p_home = consensus["home"]
+                    p_draw = consensus["draw"]
+                    p_away = consensus["away"]
+                    # Durchschnitts-Lambda für Score-Schätzung
+                    avg_lam_h = 1.4 + 0.3 * (p_home - 0.33)
+                    avg_lam_a = 1.4 + 0.3 * (p_away - 0.33)
+                    score_home, score_away = predict_most_likely_score(avg_lam_h, avg_lam_a)
+                    model_src = "Konsens"
+
+            # Tendenz bestimmen
+            if p_home is not None:
+                if p_home >= p_draw and p_home >= p_away:
+                    tendency = "Heimsieg"
+                elif p_draw >= p_home and p_draw >= p_away:
+                    tendency = "Unentschieden"
+                else:
+                    tendency = "Auswärtssieg"
+            else:
+                tendency = "?"
+
+            results.append({
+                "league":      label,
+                "sport_key":   sport_key,
+                "match":       f"{home_api} – {away_api}",
+                "home_team":   home_api,
+                "away_team":   away_api,
+                "kick_off":    kick_off,
+                "p_home":      p_home,
+                "p_draw":      p_draw,
+                "p_away":      p_away,
+                "tendency":    tendency,
+                "score_home":  score_home,
+                "score_away":  score_away,
+                "model_src":   model_src,
+            })
+
+    # ── UEFA via Club-Elo + euro_model ───────────────────────────────────────
+    for sport_key in KICKTIPP_UEFA_SPORTS:
+        label = KICKTIPP_LABELS.get(sport_key, sport_key)
+        matches = loaded_matches.get(sport_key, [])
+        print(f"  [Kicktipp] {label}: {len(matches)} Spiele …")
+
+        for match in matches:
+            home_api = match["home_team"]
+            away_api = match["away_team"]
+            kick_off = match.get("commence_time", "")
+
+            p_home = p_draw = p_away = None
+            score_home = score_away = None
+            model_src = None
+
+            # Club-Elo für 1X2
+            if club_elo_dict:
+                elo_home = find_club_elo(home_api, club_elo_dict)
+                elo_away = find_club_elo(away_api, club_elo_dict)
+                if elo_home is not None and elo_away is not None:
+                    p_home, p_draw, p_away = elo_to_football_1x2(elo_home, elo_away)
+                    model_src = "ClubElo"
+
+            # Score via euro_model falls vorhanden
+            if euro_model:
+                home_model = find_team_in_model(home_api, euro_model["teams"])
+                away_model = find_team_in_model(away_api, euro_model["teams"])
+                if home_model and away_model:
+                    probs_eu = predict_football(home_model, away_model, euro_model)
+                    if probs_eu:
+                        score_home, score_away = predict_most_likely_score(
+                            probs_eu["lam_home"], probs_eu["lam_away"]
+                        )
+                        if model_src is None:
+                            p_home = probs_eu["home"]
+                            p_draw = probs_eu["draw"]
+                            p_away = probs_eu["away"]
+                            model_src = "Poisson-EU"
+
+            # Score-Fallback via Elo-Durchschnitt
+            if score_home is None and p_home is not None:
+                avg_lam_h = 1.4 + 0.3 * (p_home - 0.33)
+                avg_lam_a = 1.4 + 0.3 * (p_away - 0.33)
+                score_home, score_away = predict_most_likely_score(avg_lam_h, avg_lam_a)
+
+            # Fallback Bookie-Konsens
+            if p_home is None:
+                consensus = bookie_consensus(match)
+                if consensus and consensus.get("home"):
+                    p_home = consensus["home"]
+                    p_draw = consensus["draw"]
+                    p_away = consensus["away"]
+                    avg_lam_h = 1.4 + 0.3 * (p_home - 0.33)
+                    avg_lam_a = 1.4 + 0.3 * (p_away - 0.33)
+                    score_home, score_away = predict_most_likely_score(avg_lam_h, avg_lam_a)
+                    model_src = "Konsens"
+
+            if p_home is not None:
+                if p_home >= p_draw and p_home >= p_away:
+                    tendency = "Heimsieg"
+                elif p_draw >= p_home and p_draw >= p_away:
+                    tendency = "Unentschieden"
+                else:
+                    tendency = "Auswärtssieg"
+            else:
+                tendency = "?"
+
+            results.append({
+                "league":      label,
+                "sport_key":   sport_key,
+                "match":       f"{home_api} – {away_api}",
+                "home_team":   home_api,
+                "away_team":   away_api,
+                "kick_off":    kick_off,
+                "p_home":      p_home,
+                "p_draw":      p_draw,
+                "p_away":      p_away,
+                "tendency":    tendency,
+                "score_home":  score_home,
+                "score_away":  score_away,
+                "model_src":   model_src,
+            })
+
+    results.sort(key=lambda x: x["kick_off"])
+    return results
+
+
+def generate_kicktipp_html(matches: list) -> str:
+    """Generiert HTML-Report für Kicktipp-Tipps."""
+    date_str  = datetime.now().strftime("%d.%m.%Y")
+    timestamp = datetime.now().strftime("%d.%m.%Y %H:%M")
+    n_matches = len(matches)
+
+    league_order = [
+        "1. Bundesliga", "2. Bundesliga", "Premier League",
+        "La Liga", "Serie A", "Ligue 1",
+        "Champions League", "Europa League",
+    ]
+    leagues_present = []
+    for lg in league_order:
+        if any(m["league"] == lg for m in matches):
+            leagues_present.append(lg)
+    for m in matches:
+        if m["league"] not in leagues_present:
+            leagues_present.append(m["league"])
+
+    def prob_cell(val, is_max):
+        if val is None:
+            return "<td>–</td>"
+        pct = f"{val*100:.1f}%"
+        if is_max:
+            return f'<td style="color:#1a7a30;font-weight:700">{pct}</td>'
+        return f"<td>{pct}</td>"
+
+    sections = ""
+    for league in leagues_present:
+        league_matches = [m for m in matches if m["league"] == league]
+        if not league_matches:
+            continue
+
+        rows = ""
+        for m in league_matches:
+            ph = m["p_home"]
+            pd_ = m["p_draw"]
+            pa = m["p_away"]
+
+            vals = [v for v in [ph, pd_, pa] if v is not None]
+            max_p = max(vals) if vals else None
+
+            score = (
+                f"{m['score_home']}:{m['score_away']}"
+                if m["score_home"] is not None else "–"
+            )
+
+            tendency = m["tendency"]
+            if tendency == "Heimsieg":
+                tend_label = f'<strong style="color:#1a56a0">{m["home_team"]}</strong>'
+            elif tendency == "Auswärtssieg":
+                tend_label = f'<strong style="color:#c05a00">{m["away_team"]}</strong>'
+            elif tendency == "Unentschieden":
+                tend_label = '<strong style="color:#555577">Unentschieden</strong>'
+            else:
+                tend_label = "?"
+
+            src_tag = f' <span class="tag2">{m.get("model_src", "?")}</span>' if m.get("model_src") else ""
+
+            rows += f"""<tr>
+              <td><strong>{m['home_team']} – {m['away_team']}</strong>{src_tag}</td>
+              <td>{format_dt(m['kick_off'])}</td>
+              <td>{tend_label}</td>
+              <td style="font-weight:700;color:#333">{score}</td>
+              {prob_cell(ph,  ph is not None and max_p is not None and ph == max_p)}
+              {prob_cell(pd_, pd_ is not None and max_p is not None and pd_ == max_p)}
+              {prob_cell(pa,  pa is not None and max_p is not None and pa == max_p)}
+            </tr>"""
+
+        icon = "🏆" if league in ("Champions League", "Europa League") else "⚽"
+        sections += f"""<h2>{icon} {league}</h2>
+<table>
+<tr>
+  <th>Spiel</th><th>Anstoß</th><th>Tipp (Tendenz)</th><th>Score</th>
+  <th>P(Heim)</th><th>P(X)</th><th>P(Ausw.)</th>
+</tr>
+{rows}
+</table>
+"""
+
+    if not sections:
+        sections = '<div class="empty">Keine Kicktipp-Spiele gefunden.</div>'
+
+    return f"""<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>🎯 Kicktipp-Tipps {date_str}</title>
+<style>{CSS}
+.kt-note {{ background:#f0fff4; border-left:3px solid #1a7a30; padding:10px 14px;
+            color:#1a4a20; font-size:0.82em; border-radius:0 6px 6px 0; margin:10px 0; }}
+</style>
+</head>
+<body>
+<h1>🎯 Kicktipp-Tipps — {date_str}</h1>
+
+<div class="summary">
+  <div class="card"><div class="val">{n_matches}</div><div class="lbl">Spiele gesamt</div></div>
+</div>
+
+<div class="kt-note">
+  📌 <strong>Hinweis:</strong> Tendenz und Score basieren auf dem Poisson-Modell (BL1/BL2/PL/LaLiga/SerieA/L1)
+  bzw. Club-Elo-Modell (CL/EL). Grün hervorgehoben = höchste Wahrscheinlichkeit.
+  Kein Ersatz für eigene Einschätzung!
+</div>
+
+{sections}
+
+<div class="footer">
+  Generiert: {timestamp} &nbsp;|&nbsp;
+  Fußball: Poisson MLE (football-data.co.uk) &nbsp;|&nbsp;
+  CL/EL: Club-Elo + Poisson &nbsp;|&nbsp;
+  Matches: The Odds API<br>
+  ⚠️ Diese Tipps dienen ausschließlich zu Unterhaltungszwecken.
+</div>
+</body>
+</html>"""
+
 
 def edge_class(e: float) -> str:
     if e >= 10: return "g"
@@ -1102,6 +1614,63 @@ def build_tennis_table(bets: list) -> str:
     return f"<table><tr>{ths}</tr>{rows}</table>"
 
 
+def build_backtesting_section() -> str:
+    """Erzeugt HTML-Sektion mit Backtesting-Feedback."""
+    try:
+        summary = get_summary()
+    except Exception:
+        return '<div class="empty">Backtesting-Daten nicht verfügbar.</div>'
+
+    ov = summary.get("overall", {})
+    if not ov or not ov.get("total_bets"):
+        return '<div class="empty">Noch keine abgeschlossenen Bets im Backtesting.</div>'
+
+    rolling = summary.get("rolling", {})
+    r7  = rolling.get("7d", {})
+    r30 = rolling.get("30d", {})
+    streak = rolling.get("streak", {})
+
+    total = ov.get("total_bets", 0)
+    won   = ov.get("won", 0)
+    roi   = ov.get("roi_pct", 0) or 0
+    pnl   = ov.get("total_pnl", 0) or 0
+    hit_rate = f"{won/total*100:.1f}" if total > 0 else "0"
+
+    r7_roi  = r7.get("roi_pct", 0) or 0
+    r7_bets = r7.get("bets", 0) or 0
+    r30_roi = r30.get("roi_pct", 0) or 0
+    r30_bets = r30.get("bets", 0) or 0
+
+    streak_str = f"{streak.get('count', 0)}× {streak.get('type', '—')}"
+
+    roi_class = "g" if roi > 0 else ("o" if roi > -5 else "y")
+    r7_class  = "g" if r7_roi > 0 else ("o" if r7_roi > -5 else "y")
+    r30_class = "g" if r30_roi > 0 else ("o" if r30_roi > -5 else "y")
+
+    html = f"""
+<div class="summary">
+  <div class="card"><div class="val {roi_class}">{roi:+.1f}%</div><div class="lbl">Gesamt-ROI ({total} Bets)</div></div>
+  <div class="card"><div class="val {r7_class}">{r7_roi:+.1f}%</div><div class="lbl">7-Tage ROI ({r7_bets})</div></div>
+  <div class="card"><div class="val {r30_class}">{r30_roi:+.1f}%</div><div class="lbl">30-Tage ROI ({r30_bets})</div></div>
+  <div class="card"><div class="val">{hit_rate}%</div><div class="lbl">Trefferquote ({won}/{total})</div></div>
+  <div class="card"><div class="val">{pnl:+.2f}</div><div class="lbl">PnL (Units)</div></div>
+  <div class="card"><div class="val">{streak_str}</div><div class="lbl">Aktuelle Serie</div></div>
+</div>"""
+
+    # Modell-Breakdown
+    by_model = summary.get("by_model", [])
+    if by_model:
+        html += '<table><tr><th>Modell</th><th>Bets</th><th>Won</th><th>PnL</th><th>ROI</th></tr>'
+        for m in by_model:
+            m_roi = m.get("roi_pct", 0) or 0
+            mc = "g" if m_roi > 0 else "y"
+            html += f'<tr><td>{m["model_source"]}</td><td>{m["bets"]}</td><td>{m["won"]}</td>'
+            html += f'<td class="{mc}">{m["pnl"]:+.2f}</td><td class="{mc}">{m_roi:+.1f}%</td></tr>'
+        html += '</table>'
+
+    return html
+
+
 def generate_html(football_bets: list, ou_bets: list,
                   tennis_bets: list, uefa_bets: list) -> str:
     date_str  = datetime.now().strftime("%d.%m.%Y")
@@ -1110,6 +1679,8 @@ def generate_html(football_bets: list, ou_bets: list,
     total     = len(football_bets) + len(ou_bets) + len(real_tennis_bets) + len(uefa_bets)
     all_edges = [b["edge_pct"] for b in football_bets + ou_bets + tennis_bets + uefa_bets]
     max_edge  = max(all_edges) if all_edges else 0.0
+
+    quota_str = f"API-Quota: {ODDS_API_REMAINING}" if ODDS_API_REMAINING is not None else "API-Quota: ?"
 
     return f"""<!DOCTYPE html>
 <html lang="de">
@@ -1125,7 +1696,7 @@ def generate_html(football_bets: list, ou_bets: list,
   <div class="card"><div class="val">{total}</div><div class="lbl">Value Bets gesamt</div></div>
   <div class="card"><div class="val">{len(football_bets)}</div><div class="lbl">⚽ Fußball 1X2</div></div>
   <div class="card"><div class="val">{len(ou_bets)}</div><div class="lbl">⚽ Über/Unter</div></div>
-  <div class="card"><div class="val">{len(uefa_bets)}</div><div class="lbl">🏆 UEFA</div></div>
+  <div class="card"><div class="val">{len(uefa_bets)}</div><div class="lbl">🏆 UEFA/Pokal</div></div>
   <div class="card"><div class="val">{len(real_tennis_bets)}</div><div class="lbl">🎾 Tennis</div></div>
   <div class="card"><div class="val">{max_edge:.1f}%</div><div class="lbl">Max. Edge</div></div>
 </div>
@@ -1136,24 +1707,28 @@ def generate_html(football_bets: list, ou_bets: list,
   Kelly-Empfehlung maximal {MAX_KELLY*100:.0f}% des Bankrolls.
 </div>
 
-<h2>⚽ Fußball Value Bets (Poisson-Modell)</h2>
+<h2>📈 Backtesting-Performance</h2>
+{build_backtesting_section()}
+
+<h2>⚽ Fußball Value Bets (Poisson-Modell, Time-Decay)</h2>
 {build_football_table(football_bets)}
 
 <h2>⚽ Über/Unter Value Bets (Poisson-Modell)</h2>
 {build_ou_table(ou_bets)}
 
-<h2>🏆 UEFA Value Bets (Champions / Europa / Conference League)</h2>
+<h2>🏆 UEFA / DFB-Pokal Value Bets</h2>
 {build_uefa_table(uefa_bets)}
 
-<h2>🎾 Tennis Value Bets (Elo-Modell)</h2>
+<h2>🎾 Tennis Value Bets (Elo-Modell, ATP + WTA, Surface-Bias)</h2>
 {build_tennis_table(tennis_bets)}
 
 <div class="footer">
   Generiert: {timestamp} &nbsp;|&nbsp;
-  Fußball-Modell: Poisson MLE (football-data.co.uk) &nbsp;|&nbsp;
-  Tennis-Modell: Elo (Jeff Sackmann ATP Data) &nbsp;|&nbsp;
+  Fußball: Poisson MLE + Time-Decay (football-data.co.uk) &nbsp;|&nbsp;
+  Tennis: Elo ATP+WTA + Surface-Bias (Jeff Sackmann) &nbsp;|&nbsp;
   Odds: The Odds API &nbsp;|&nbsp;
-  UEFA-Modell: Club-Elo + Poisson (football-data.co.uk)<br>
+  UEFA/Pokal: Club-Elo + Poisson &nbsp;|&nbsp;
+  {quota_str}<br>
   ⚠️ Diese Analyse dient ausschließlich zu Informationszwecken.
   Sportwetten sind mit erheblichen Verlustrisiken verbunden.
 </div>
@@ -1207,6 +1782,7 @@ def main() -> int:
     all_ou_bets:       list = []
     all_tennis_bets:   list = []
     all_uefa_bets:     list = []
+    loaded_matches: dict = {}  # sport_key → [match, …] für Kicktipp-Wiederverwendung
 
     if args.dry_run:
         print("\n[DRY-RUN] Keine externen API-Calls. Erzeuge leeren Report …")
@@ -1247,6 +1823,7 @@ def main() -> int:
             except Exception as e:
                 print(f"    Fehler: {e}")
                 continue
+            loaded_matches[sport_key] = matches  # für Kicktipp wiederverwenden
             if ODDS_API_REMAINING is not None and ODDS_API_REMAINING <= MIN_ODDS_API_REMAINING:
                 print(f"    Hinweis: API-Quota sehr niedrig ({ODDS_API_REMAINING}) – stoppe weitere Odds-Calls.")
                 break
@@ -1273,10 +1850,25 @@ def main() -> int:
                               f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
 
         # ── TENNIS ──────────────────────────────────────────────────────────
-        print("\n[🎾 Tennis] Elo-Ratings berechnen …")
+        print("\n[🎾 Tennis] ATP Elo-Ratings berechnen …")
         elo_years = get_elo_years()
-        elo_dict = compute_tennis_elo(elo_years)
-        print(f"  {len(elo_dict)} Spieler im Elo-Dict")
+        atp_elo_dict, atp_surface_elo = compute_tennis_elo(elo_years)
+        print(f"  ATP: {len(atp_elo_dict)} Spieler im Elo-Dict")
+        for surf, sdict in atp_surface_elo.items():
+            print(f"    {surf}: {len(sdict)} Spieler")
+
+        print("\n[🎾 Tennis] WTA Elo-Ratings berechnen …")
+        wta_elo_dict, wta_surface_elo = compute_wta_elo(elo_years)
+        print(f"  WTA: {len(wta_elo_dict)} Spielerinnen im Elo-Dict")
+        for surf, sdict in wta_surface_elo.items():
+            print(f"    {surf}: {len(sdict)} Spielerinnen")
+
+        # Kombiniertes Dict für Lookup (ATP + WTA)
+        combined_elo = {**atp_elo_dict, **wta_elo_dict}
+        combined_surface_elo = {}
+        for surf in ["Hard", "Clay", "Grass"]:
+            combined_surface_elo[surf] = {**atp_surface_elo.get(surf, {}),
+                                          **wta_surface_elo.get(surf, {})}
 
         print("\n[🎾 Tennis] Aktive Turniere suchen …")
         try:
@@ -1303,7 +1895,7 @@ def main() -> int:
                 print(f"    Hinweis: API-Quota sehr niedrig ({ODDS_API_REMAINING}) – stoppe weitere Odds-Calls.")
                 break
             for match in matches:
-                bets = analyze_tennis_match(match, title, elo_dict)
+                bets = analyze_tennis_match(match, title, combined_elo, combined_surface_elo)
                 if bets:
                     all_tennis_bets.extend(bets)
                     for b in bets:
@@ -1342,6 +1934,7 @@ def main() -> int:
             except Exception as e:
                 print(f"    Fehler: {e}")
                 continue
+            loaded_matches[sport_key] = matches  # für Kicktipp wiederverwenden
             if ODDS_API_REMAINING is not None and ODDS_API_REMAINING <= MIN_ODDS_API_REMAINING:
                 print(f"    Hinweis: API-Quota sehr niedrig ({ODDS_API_REMAINING}) – stoppe weitere Odds-Calls.")
                 break
@@ -1354,6 +1947,73 @@ def main() -> int:
                         typ = b["bet_type"].upper()
                         print(f"    ✓ UEFA VALUE [{typ}]: {b['match']} → {b['tip']} "
                               f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
+
+        # ── DFB-POKAL (konditionell) ──────────────────────────────────────
+        dfb_key = "soccer_germany_dfb_pokal"
+        try:
+            if 'all_sports' not in locals():
+                all_sports = get_active_sports(api_key)
+            dfb_active = any(s["key"] == dfb_key and s["active"]
+                             for s in all_sports)
+        except Exception:
+            dfb_active = False
+
+        if dfb_active:
+            print("\n[🏆 DFB-Pokal] Matches via Odds API …")
+            try:
+                matches = get_odds(api_key, dfb_key)
+                for match in matches:
+                    bets = analyze_uefa_match(match, club_elo_dict, euro_model)
+                    if bets:
+                        # Tag als DFB-Pokal in den Bets setzen
+                        for b in bets:
+                            b["sport"] = dfb_key
+                        all_uefa_bets.extend(bets)
+                        for b in bets:
+                            log_prediction(_run_id, b, match_raw=match)
+                            typ = b["bet_type"].upper()
+                            print(f"    ✓ DFB-Pokal [{typ}]: {b['match']} → {b['tip']} "
+                                  f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
+            except Exception as e:
+                print(f"    Fehler: {e}")
+        else:
+            print("\n[🏆 DFB-Pokal] Keine aktive Runde – übersprungen")
+
+    # ── KICKTIPP ────────────────────────────────────────────────────────────
+    kicktipp_matches = []
+    if not args.dry_run:
+        print("\n[🎯 Kicktipp] Tipps sammeln (nutzt bereits geladene Matches) …")
+        kicktipp_matches = collect_kicktipp_predictions(
+            football_models, club_elo_dict, euro_model, loaded_matches
+        )
+        print(f"  → {len(kicktipp_matches)} Kicktipp-Spiele gesammelt")
+
+        if kicktipp_matches:
+            kt_html = generate_kicktipp_html(kicktipp_matches)
+            kt_html_path = out_dir / "kicktipp_report.html"
+            kt_html_path.write_text(kt_html, encoding="utf-8")
+            print(f"  HTML: {kt_html_path}")
+
+            # JSON für Dashboard
+            kt_json = []
+            for m in kicktipp_matches:
+                kt_json.append({
+                    "league":     m["league"],
+                    "home":       m["home_team"],
+                    "away":       m["away_team"],
+                    "kick_off":   m["kick_off"],
+                    "p_home":     round(m["p_home"], 4) if m["p_home"] else None,
+                    "p_draw":     round(m["p_draw"], 4) if m["p_draw"] else None,
+                    "p_away":     round(m["p_away"], 4) if m["p_away"] else None,
+                    "score_home": m["score_home"],
+                    "score_away": m["score_away"],
+                    "tendency":   m["tendency"],
+                    "model_src":  m.get("model_src"),
+                })
+            kt_json_path = out_dir / "kicktipp_data.json"
+            kt_json_path.write_text(json.dumps(kt_json, ensure_ascii=False, indent=2),
+                                    encoding="utf-8")
+            print(f"  JSON: {kt_json_path}")
 
     # ── REPORT ──────────────────────────────────────────────────────────────
     print(f"\n[📊 Report] Football Bets: {len(all_football_bets)}")
@@ -1434,6 +2094,12 @@ def main() -> int:
 
     if _run_id is not None:
         resolve_results()
+
+    # ── TELEGRAM ALERTS ───────────────────────────────────────────────────
+    all_bets_combined = all_football_bets + all_ou_bets + all_tennis_bets + all_uefa_bets
+    if all_bets_combined:
+        print("\n[📱 Telegram] High-Edge Alerts …")
+        send_high_edge_alerts(all_bets_combined, min_edge=10.0)
 
     print("\n✓ Fertig!")
     return 0
