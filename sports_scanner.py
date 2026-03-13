@@ -982,18 +982,18 @@ def analyze_uefa_match(match: dict, elo_dict: dict,
             edge, kelly = compute_value(model_p, odds)
             if MIN_EDGE_PCT / 100 <= edge <= MAX_EDGE_PCT / 100:
                 bets.append({
-                    "bet_type":   "1x2",
-                    "sport":      match.get("sport_key", ""),
-                    "match":      f"{home_api} – {away_api}",
-                    "tip":        labels[outcome],
-                    "kick_off":   match["commence_time"],
-                    "model_prob": model_p,
-                    "best_odds":  odds,
-                    "edge_pct":   edge * 100,
-                    "kelly_pct":  min(kelly, MAX_KELLY) * 100,
-                    "model_src":  "ClubElo",
-                    "elo_home":   elo_home,
-                    "elo_away":   elo_away,
+                    "type":           "1x2",
+                    "sport":          match.get("sport_key", ""),
+                    "match":          f"{home_api} – {away_api}",
+                    "tip":            labels[outcome],
+                    "kick_off":       match["commence_time"],
+                    "model_prob":     model_p,
+                    "best_odds":      odds,
+                    "edge_pct":       edge * 100,
+                    "kelly_pct":      min(kelly, MAX_KELLY) * 100,
+                    "model_source":   "ClubElo",
+                    "elo_home":       elo_home,
+                    "elo_away":       elo_away,
                 })
 
     # ── O/U via Poisson ─────────────────────────────────────────────────────
@@ -1023,18 +1023,18 @@ def analyze_uefa_match(match: dict, elo_dict: dict,
                         edge, kelly = compute_value(model_p, odds)
                         if MIN_EDGE_PCT / 100 <= edge <= MAX_EDGE_PCT / 100:
                             bets.append({
-                                "bet_type":   "ou",
-                                "sport":      match.get("sport_key", ""),
-                                "match":      f"{home_api} – {away_api}",
-                                "tip":        f"{side} {line}",
-                                "kick_off":   match["commence_time"],
-                                "model_prob": model_p,
-                                "best_odds":  odds,
-                                "edge_pct":   edge * 100,
-                                "kelly_pct":  min(kelly, MAX_KELLY) * 100,
-                                "model_src":  "Poisson",
-                                "lam_home":   lam_home,
-                                "lam_away":   lam_away,
+                                "type":           "ou",
+                                "sport":          match.get("sport_key", ""),
+                                "match":          f"{home_api} – {away_api}",
+                                "tip":            f"{side} {line}",
+                                "kick_off":       match["commence_time"],
+                                "model_prob":     model_p,
+                                "best_odds":      odds,
+                                "edge_pct":       edge * 100,
+                                "kelly_pct":      min(kelly, MAX_KELLY) * 100,
+                                "model_source":   "Poisson",
+                                "lam_home":       lam_home,
+                                "lam_away":       lam_away,
                             })
     return bets
 
@@ -1256,7 +1256,7 @@ def collect_kicktipp_predictions(football_models: dict, club_elo_dict: dict,
                 "tendency":    tendency,
                 "score_home":  score_home,
                 "score_away":  score_away,
-                "model_src":   model_src,
+                "model_source": model_src,
             })
 
     # ── UEFA via Club-Elo + euro_model ───────────────────────────────────────
@@ -1341,7 +1341,7 @@ def collect_kicktipp_predictions(football_models: dict, club_elo_dict: dict,
                 "tendency":    tendency,
                 "score_home":  score_home,
                 "score_away":  score_away,
-                "model_src":   model_src,
+                "model_source": model_src,
             })
 
     results.sort(key=lambda x: x["kick_off"])
@@ -1405,7 +1405,7 @@ def generate_kicktipp_html(matches: list) -> str:
             else:
                 tend_label = "?"
 
-            src_tag = f' <span class="tag2">{m.get("model_src", "?")}</span>' if m.get("model_src") else ""
+            src_tag = f' <span class="tag2">{m.get("model_source", "?")}</span>' if m.get("model_source") else ""
 
             rows += f"""<tr>
               <td><strong>{m['home_team']} – {m['away_team']}</strong>{src_tag}</td>
@@ -1549,7 +1549,7 @@ def build_uefa_table(bets: list) -> str:
         rows = ""
         for b in league_bets:
             ec = edge_class(b["edge_pct"])
-            typ_label = "1X2" if b["bet_type"] == "1x2" else "O/U"
+            typ_label = "1X2" if b.get("type", "") == "1x2" else "O/U"
             elo_h = b.get("elo_home")
             elo_a = b.get("elo_away")
             elo_str = f"{int(elo_h)}/{int(elo_a)}" if elo_h and elo_a else "–"
@@ -1562,7 +1562,7 @@ def build_uefa_table(bets: list) -> str:
           <td>{b['best_odds']:.2f}</td>
           <td class="{ec}">{b['edge_pct']:.1f}%</td>
           <td style="color:#58a6ff">{b['kelly_pct']:.1f}%</td>
-          <td style="color:#8b949e">{b['model_src']}</td>
+          <td style="color:#8b949e">{b.get("model_source", "")}</td>
           <td style="color:#8b949e">{elo_str}</td>
         </tr>"""
         html += f"<table><tr>{ths}</tr>{rows}</table>"
@@ -1842,6 +1842,7 @@ def main() -> int:
     all_ou_bets:       list = []
     all_tennis_bets:   list = []
     all_uefa_bets:     list = []
+    all_sports = None  # Wird bei Bedarf von get_active_sports() befüllt
     loaded_matches: dict = {}  # sport_key → [match, …] für Kicktipp-Wiederverwendung
 
     if args.dry_run:
@@ -2010,14 +2011,14 @@ def main() -> int:
                     all_uefa_bets.extend(bets)
                     for b in bets:
                         b["_pred_id"] = log_prediction(_run_id, b, match_raw=match)
-                        typ = b["bet_type"].upper()
+                        typ = b.get("type", "").upper()
                         print(f"    ✓ UEFA VALUE [{typ}]: {b['match']} → {b['tip']} "
                               f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
 
         # ── DFB-POKAL (konditionell) ──────────────────────────────────────
         dfb_key = "soccer_germany_dfb_pokal"
         try:
-            if 'all_sports' not in locals():
+            if all_sports is None:
                 all_sports = get_active_sports(api_key)
             dfb_active = any(s["key"] == dfb_key and s["active"]
                              for s in all_sports)
@@ -2038,7 +2039,7 @@ def main() -> int:
                         all_uefa_bets.extend(bets)
                         for b in bets:
                             b["_pred_id"] = log_prediction(_run_id, b, match_raw=match)
-                            typ = b["bet_type"].upper()
+                            typ = b.get("type", "").upper()
                             print(f"    ✓ DFB-Pokal [{typ}]: {b['match']} → {b['tip']} "
                                   f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
             except Exception as e:
@@ -2075,7 +2076,7 @@ def main() -> int:
                     "score_home": m["score_home"],
                     "score_away": m["score_away"],
                     "tendency":   m["tendency"],
-                    "model_src":  m.get("model_src"),
+                    "model_source": m.get("model_source"),
                 })
             kt_json_path = out_dir / "kicktipp_data.json"
             kt_json_path.write_text(json.dumps(kt_json, ensure_ascii=False, indent=2),
@@ -2156,7 +2157,7 @@ def main() -> int:
         })
     for b in all_uefa_bets:
         row = {
-            "Typ":        f"UEFA {b['bet_type'].upper()}",
+            "Typ":        f"UEFA {b.get('type', '').upper()}",
             "Liga":       UEFA_LABELS.get(b["sport"], b["sport"]),
             "Spiel":      b["match"],
             "Tipp":       b["tip"],
@@ -2168,9 +2169,9 @@ def main() -> int:
             "Score":      f"{b.get('confidence_score', 0):.0f}",
             "Tier":       b.get("tier", ""),
             "Stake":      f"{b.get('stake_eur', 0):.2f}",
-            "Modell":     b["model_src"],
+            "Modell":     b.get("model_source", ""),
         }
-        if b["bet_type"] == "ou":
+        if b.get("type", "") == "ou":
             row["λ-Heim"] = f"{b.get('lam_home', 0):.2f}"
             row["λ-Gast"] = f"{b.get('lam_away', 0):.2f}"
         rows.append(row)

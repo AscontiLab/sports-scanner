@@ -139,7 +139,7 @@ def _infer_outcome_side(bet_dict: dict) -> str | None:
     Rückgabe: "home" | "draw" | "away" | "over" | "under" | None
     """
     tip      = bet_dict.get("tip", "")
-    bet_type = (bet_dict.get("type") or bet_dict.get("bet_type") or "").lower()
+    bet_type = bet_dict.get("type", "").lower()
 
     # Over/Under
     if "ou" in bet_type or bet_dict.get("ou_line") is not None:
@@ -174,8 +174,8 @@ def _infer_outcome_side(bet_dict: dict) -> str | None:
 
 
 def _infer_bet_type(bet_dict: dict) -> str:
-    """Normalisiert die verschiedenen bet_type-Felder auf "1x2" | "ou" | "tennis"."""
-    raw = (bet_dict.get("type") or bet_dict.get("bet_type") or "").lower()
+    """Normalisiert das type-Feld auf "1x2" | "ou" | "tennis"."""
+    raw = bet_dict.get("type", "").lower()
     if raw in ("football_ou", "ou"):
         return "ou"
     if raw == "tennis":
@@ -387,16 +387,14 @@ def log_prediction(
     outcome_side         = _infer_outcome_side(bet_dict)
     consensus_prob, overround, best_bookie = _calc_consensus(match_raw)
 
-    # Modell-Source normalisieren (Scanner verwendet "model_source" bei Tennis,
-    # "model_src" bei UEFA)
+    # Modell-Source normalisieren
     model_source = (
         bet_dict.get("model_source")
-        or bet_dict.get("model_src")
         or ("Poisson" if bet_type in ("1x2", "ou") else "Elo")
     )
 
     # Elo-Werte: direkt aus bet_dict wenn vorhanden (Tennis: "elo",
-    # UEFA: aus model_src-String nicht abrufbar → None)
+    # UEFA: nicht verfügbar → None)
     elo_home = bet_dict.get("elo") if bet_dict.get("tip") == home_team else None
     elo_away = bet_dict.get("elo") if bet_dict.get("tip") == away_team else None
 
@@ -832,7 +830,11 @@ def resolve_results(api_key: str | None = None) -> dict:
         try:
             scores_data = _fetch_with_retry(url)
         except Exception as e:
-            print(f"[Backtesting] Scores-API Fehler ({sport_key}): {e} – übersprungen")
+            # API-Key aus Fehlermeldungen entfernen
+            err_msg = str(e)
+            if api_key and api_key in err_msg:
+                err_msg = err_msg.replace(api_key, "***")
+            print(f"[Backtesting] Scores-API Fehler ({sport_key}): {err_msg} – übersprungen")
             still_open += sum(len(v) for v in match_map.values()) + len(no_id_preds)
             continue
 

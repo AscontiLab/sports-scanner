@@ -6,6 +6,8 @@ Bewertet alle Value Bets mit einem Confidence Score (0–100),
 ordnet Tiers zu und selektiert die Top-N Bets für den Wettplan.
 """
 
+from functools import lru_cache
+
 from config import (
     CONFIDENCE_WEIGHTS,
     TIER_STRONG_PICK,
@@ -27,34 +29,36 @@ def _get_model_stats() -> dict:
 
     db_path = Path(__file__).parent / "sports_backtesting.db"
     try:
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute("""
-            SELECT
-                model_source,
-                COUNT(*) AS total,
-                SUM(CASE WHEN bet_won = 1 THEN 1 ELSE 0 END) AS won,
-                ROUND(
-                    100.0 * SUM(pnl_units) / NULLIF(SUM(stake_units), 0), 2
-                ) AS roi_pct
-            FROM predictions
-            WHERE bet_won IS NOT NULL
-            GROUP BY model_source
-        """).fetchall()
-        conn.close()
-        return {
-            r["model_source"]: {
-                "resolved": r["total"],
-                "roi_pct": float(r["roi_pct"]) if r["roi_pct"] else 0.0,
-                "won": r["won"],
-                "total": r["total"],
+        # Context-Manager für automatisches Schließen
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("""
+                SELECT
+                    model_source,
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN bet_won = 1 THEN 1 ELSE 0 END) AS won,
+                    ROUND(
+                        100.0 * SUM(pnl_units) / NULLIF(SUM(stake_units), 0), 2
+                    ) AS roi_pct
+                FROM predictions
+                WHERE bet_won IS NOT NULL
+                GROUP BY model_source
+            """).fetchall()
+            return {
+                r["model_source"]: {
+                    "resolved": r["total"],
+                    "roi_pct": float(r["roi_pct"]) if r["roi_pct"] else 0.0,
+                    "won": r["won"],
+                    "total": r["total"],
+                }
+                for r in rows
             }
-            for r in rows
-        }
     except Exception:
         return {}
 
 
+# Gecacht pro Lauf – wird nur einmal aus der DB gelesen
+@lru_cache(maxsize=1)
 def _get_training_matches_count() -> int:
     """Liest die Anzahl der Training-Matches aus dem letzten Scan-Run."""
     import sqlite3
@@ -62,12 +66,12 @@ def _get_training_matches_count() -> int:
 
     db_path = Path(__file__).parent / "sports_backtesting.db"
     try:
-        conn = sqlite3.connect(db_path)
-        row = conn.execute(
-            "SELECT training_matches FROM scan_runs ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-        conn.close()
-        return int(row[0]) if row and row[0] else 0
+        # Context-Manager für automatisches Schließen
+        with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                "SELECT training_matches FROM scan_runs ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            return int(row[0]) if row and row[0] else 0
     except Exception:
         return 0
 
@@ -97,7 +101,6 @@ def compute_confidence_score(bet: dict, model_stats: dict | None = None) -> floa
     # 2. Modell-Zuverlässigkeit (25%): ROI + Trust-Faktor
     model_src = (
         bet.get("model_source")
-        or bet.get("model_src")
         or _infer_model_source(bet)
     )
     stats = model_stats.get(model_src, {})
@@ -139,8 +142,8 @@ def compute_confidence_score(bet: dict, model_stats: dict | None = None) -> floa
 
 
 def _infer_model_source(bet: dict) -> str:
-    """Leitet model_source aus bet_type ab."""
-    bet_type = (bet.get("type") or bet.get("bet_type") or "").lower()
+    """Leitet model_source aus type ab."""
+    bet_type = bet.get("type", "").lower()
     if bet_type == "tennis":
         return "Elo"
     if bet_type in ("football", "football_ou", "1x2", "ou"):
@@ -164,7 +167,7 @@ def _match_key(bet: dict) -> str:
 
 def _bet_market_type(bet: dict) -> str:
     """Bestimmt den Markttyp: '1x2', 'ou', oder 'tennis'."""
-    raw = (bet.get("type") or bet.get("bet_type") or "").lower()
+    raw = bet.get("type", "").lower()
     if raw in ("football_ou", "ou"):
         return "ou"
     if raw == "tennis":

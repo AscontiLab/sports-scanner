@@ -172,8 +172,19 @@ def record_daily_snapshot(
         bets_placed = int(stats["bets_placed"]) if stats["bets_placed"] else 0
         bets_won = int(stats["bets_won"]) if stats["bets_won"] else 0
 
+        # Prüfen ob Snapshot für heute bereits existiert (Doppel-Zählung vermeiden)
+        existing = conn.execute(
+            "SELECT bankroll FROM bankroll_snapshots WHERE date = ?",
+            (date_str,),
+        ).fetchone()
+
         if bankroll is None:
-            bankroll = get_current_bankroll() + day_pnl
+            if existing:
+                # Snapshot existiert bereits – nur Bankroll aktualisieren, kein erneutes Addieren
+                prev_bankroll = float(existing["bankroll"])
+                bankroll = prev_bankroll
+            else:
+                bankroll = get_current_bankroll() + day_pnl
 
         conn.execute(
             """INSERT OR REPLACE INTO bankroll_snapshots
