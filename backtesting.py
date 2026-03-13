@@ -94,7 +94,14 @@ CREATE TABLE IF NOT EXISTS predictions (
 
     -- Profit/Loss
     stake_units       REAL    DEFAULT 1.0,
-    pnl_units         REAL                -- befüllt nach Spielende
+    pnl_units         REAL,               -- befüllt nach Spielende
+
+    -- Wettplan-System (neu)
+    stake_eur         REAL,               -- Einsatz in EUR (via Quarter-Kelly)
+    tier              TEXT,               -- "Strong Pick" | "Value Bet" | "Watch"
+    confidence_score  REAL,               -- 0–100
+    selected          INTEGER DEFAULT 0,  -- 1 = im Wettplan, 0 = nur Watch
+    pnl_eur           REAL                -- EUR-Profit/Loss nach Spielende
 );
 
 CREATE TABLE IF NOT EXISTS odds_snapshot (
@@ -304,7 +311,27 @@ def init_db(db_path: Path | None = None) -> None:
         DB_PATH = db_path
     with _connect() as conn:
         conn.executescript(_SCHEMA)
+        # Migration: neue Wettplan-Spalten zu bestehenden DBs hinzufügen
+        _migrate_wettplan_columns(conn)
     print(f"[Backtesting] DB initialisiert: {DB_PATH}")
+
+
+def _migrate_wettplan_columns(conn: sqlite3.Connection) -> None:
+    """Fügt Wettplan-Spalten hinzu falls sie nicht existieren (für bestehende DBs)."""
+    existing = {
+        row[1] for row in conn.execute("PRAGMA table_info(predictions)").fetchall()
+    }
+    migrations = [
+        ("stake_eur",        "REAL"),
+        ("tier",             "TEXT"),
+        ("confidence_score", "REAL"),
+        ("selected",         "INTEGER DEFAULT 0"),
+        ("pnl_eur",          "REAL"),
+    ]
+    for col_name, col_type in migrations:
+        if col_name not in existing:
+            conn.execute(f"ALTER TABLE predictions ADD COLUMN {col_name} {col_type}")
+            print(f"[Backtesting] Migration: Spalte '{col_name}' hinzugefügt")
 
 
 def log_scan_run(
@@ -373,6 +400,12 @@ def log_prediction(
     elo_home = bet_dict.get("elo") if bet_dict.get("tip") == home_team else None
     elo_away = bet_dict.get("elo") if bet_dict.get("tip") == away_team else None
 
+    # Wettplan-Felder (optional, befüllt vom Bet-Selektor)
+    stake_eur = bet_dict.get("stake_eur")
+    tier = bet_dict.get("tier")
+    confidence_score = bet_dict.get("confidence_score")
+    selected = bet_dict.get("selected", 0)
+
     with _connect() as conn:
         cur = conn.execute(
             """
@@ -382,14 +415,16 @@ def log_prediction(
                 tip, outcome_side, ou_line,
                 model_prob, model_source, lam_home, lam_away, elo_home, elo_away,
                 best_odds, best_odds_bookie, consensus_prob, overround,
-                edge_pct, kelly_pct, stake_units
+                edge_pct, kelly_pct, stake_units,
+                stake_eur, tier, confidence_score, selected
             ) VALUES (
                 ?, ?, ?, ?,
                 ?, ?, ?,
                 ?, ?, ?,
                 ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?,
-                ?, ?, ?
+                ?, ?, ?,
+                ?, ?, ?, ?
             )
             """,
             (
@@ -416,6 +451,10 @@ def log_prediction(
                 bet_dict.get("edge_pct", 0.0),
                 bet_dict.get("kelly_pct", 0.0),
                 stake_units,
+                stake_eur,
+                tier,
+                confidence_score,
+                selected,
             ),
         )
         prediction_id = cur.lastrowid
@@ -454,6 +493,28 @@ def log_prediction(
                         )
 
     return prediction_id
+
+
+def update_prediction_selection(
+    prediction_id: int,
+    confidence_score: float,
+    tier: str,
+    stake_eur: float,
+    selected: int,
+) -> None:
+    """Aktualisiert eine Prediction mit Wettplan-Daten (nach Bet-Selektion)."""
+    with _connect() as conn:
+        conn.execute(
+            """
+            UPDATE predictions SET
+                confidence_score = ?,
+                tier             = ?,
+                stake_eur        = ?,
+                selected         = ?
+            WHERE id = ?
+            """,
+            (confidence_score, tier, stake_eur, selected, prediction_id),
+        )
 
 
 def get_open_predictions() -> list[dict]:
@@ -583,6 +644,17 @@ def update_result(
             bet_won   = 0
             pnl_units = -row["stake_units"]
 
+        # EUR-PnL berechnen (nur wenn Stake in EUR vorhanden)
+        pnl_eur = None
+        stake_eur = row.get("stake_eur")
+        if stake_eur and stake_eur > 0:
+            if actual_outcome == "push":
+                pnl_eur = 0.0
+            elif bet_won == 1:
+                pnl_eur = round((row["best_odds"] - 1.0) * stake_eur, 2)
+            elif bet_won == 0:
+                pnl_eur = round(-stake_eur, 2)
+
         fetched_at = datetime.now(timezone.utc).isoformat()
 
         conn.execute(
@@ -593,10 +665,12 @@ def update_result(
                 away_score        = ?,
                 actual_outcome    = ?,
                 bet_won           = ?,
-                pnl_units         = ?
+                pnl_units         = ?,
+                pnl_eur           = ?
             WHERE id = ?
             """,
-            (fetched_at, home_score, away_score, actual_outcome, bet_won, pnl_units, prediction_id),
+            (fetched_at, home_score, away_score, actual_outcome,
+             bet_won, pnl_units, pnl_eur, prediction_id),
         )
 
     return {
@@ -606,6 +680,7 @@ def update_result(
         "actual_outcome": actual_outcome,
         "bet_won":        bet_won,
         "pnl_units":      pnl_units,
+        "pnl_eur":        pnl_eur,
     }
 
 

@@ -28,124 +28,31 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from scipy.stats import poisson
 from scipy.optimize import minimize
-from backtesting import init_db, log_scan_run, log_prediction, resolve_results, get_summary
+from backtesting import init_db, log_scan_run, log_prediction, resolve_results, get_summary, update_prediction_selection
 from alerts import send_high_edge_alerts
+from config import (
+    SCRIPT_DIR, OUTPUT_DIR, CREDS_FILE,
+    FOOTBALL_SPORTS, SPORT_LABELS, FDCO_LEAGUES, OPENLIGADB_BASE,
+    MIN_EDGE_PCT, MAX_EDGE_PCT, MIN_ODDS, MAX_KELLY,
+    ELO_K_FACTOR, ELO_INITIAL, ELO_YEARS,
+    UEFA_SPORTS, UEFA_LABELS,
+    CLUBELO_URL_HTTPS, CLUBELO_URL_HTTP,
+    EUROPEAN_FDCO_LEAGUES,
+    ODDS_API_BASE, MIN_ODDS_API_REMAINING,
+    KICKTIPP_FOOTBALL_SPORTS, KICKTIPP_UEFA_SPORTS, KICKTIPP_LABELS,
+)
+from bankroll_manager import (
+    init_bankroll, get_current_bankroll, get_daily_budget,
+    record_daily_snapshot, get_peak_and_drawdown,
+)
+from bet_selector import select_bets
 
 import subprocess
 
 warnings.filterwarnings("ignore")
 
-SCRIPT_DIR = Path(__file__).parent
-OUTPUT_DIR  = SCRIPT_DIR / "output"
-CREDS_FILE  = Path.home() / ".stock_scanner_credentials"
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# KONFIGURATION
-# ═══════════════════════════════════════════════════════════════════════════════
-
-FOOTBALL_SPORTS = [
-    "soccer_germany_bundesliga",
-    "soccer_germany_bundesliga2",
-    "soccer_germany_liga3",
-    "soccer_epl",
-    "soccer_spain_la_liga",
-    "soccer_italy_serie_a",
-    "soccer_france_ligue_one",
-]
-
-SPORT_LABELS = {
-    "soccer_germany_bundesliga":       "1. Bundesliga",
-    "soccer_germany_bundesliga2":      "2. Bundesliga",
-    "soccer_germany_liga3":            "3. Liga",
-    "soccer_germany_dfb_pokal":        "DFB-Pokal",
-    "soccer_epl":                      "Premier League",
-    "soccer_spain_la_liga":            "La Liga",
-    "soccer_italy_serie_a":            "Serie A",
-    "soccer_france_ligue_one":         "Ligue 1",
-}
-
-# football-data.co.uk URLs (D1/D2 = Standardformat)
-FDCO_LEAGUES = {
-    "soccer_germany_bundesliga": "D1",
-    "soccer_germany_bundesliga2": "D2",
-    "soccer_epl": "E0",
-    "soccer_spain_la_liga": "SP1",
-    "soccer_italy_serie_a": "I1",
-    "soccer_france_ligue_one": "F1",
-    # 3. Liga kommt von OpenLigaDB (s. load_liga3_data)
-}
-
-# OpenLigaDB API für 3. Liga
-OPENLIGADB_BASE = "https://api.openligadb.de"
-
-# Schwellwerte Value Betting
-MIN_EDGE_PCT = 3.0    # Mindest-Edge in %
-MAX_EDGE_PCT = 100.0  # Max. Edge in % — höhere Werte deuten auf Datenfehler hin
-MIN_ODDS     = 1.25   # Mindest-Quoten
-MAX_KELLY    = 0.05   # Max. Kelly-Anteil (5 % des Bankrolls)
-
-# Tennis Elo-Einstellungen
-ELO_K_FACTOR  = 32
-ELO_INITIAL   = 1500
-ELO_YEARS     = list(range(datetime.now().year - 3, datetime.now().year + 1))
-
-# UEFA-Wettbewerbe
-UEFA_SPORTS = [
-    "soccer_uefa_champs_league",
-    "soccer_uefa_europa_league",
-    "soccer_uefa_europa_conference_league",
-]
-
-UEFA_LABELS = {
-    "soccer_uefa_champs_league":            "Champions League",
-    "soccer_uefa_europa_league":            "Europa League",
-    "soccer_uefa_europa_conference_league": "Conference League",
-    "soccer_germany_dfb_pokal":             "DFB-Pokal",
-}
-
-# Club-Elo API
-CLUBELO_URL_HTTPS = "https://api.clubelo.com/{date}"
-CLUBELO_URL_HTTP  = "http://api.clubelo.com/{date}"
-
-# Multi-Liga Poisson-Modell (Top-5-Ligen + Bundesliga 1+2)
-EUROPEAN_FDCO_LEAGUES = [
-    "E0",   # Premier League
-    "SP1",  # La Liga
-    "I1",   # Serie A
-    "F1",   # Ligue 1
-    "D1",   # Bundesliga 1
-    "D2",   # Bundesliga 2
-]
-
-# Odds API Quota: bei sehr niedrigem Rest nicht weiterziehen
-MIN_ODDS_API_REMAINING = 5
+# Mutable global — nicht in config.py
 ODDS_API_REMAINING: int | None = None
-
-# ── KICKTIPP-KONFIGURATION ──────────────────────────────────────────────────
-KICKTIPP_FOOTBALL_SPORTS = [
-    "soccer_germany_bundesliga",
-    "soccer_germany_bundesliga2",
-    "soccer_epl",
-    "soccer_spain_la_liga",
-    "soccer_italy_serie_a",
-    "soccer_france_ligue_one",
-]
-
-KICKTIPP_UEFA_SPORTS = [
-    "soccer_uefa_champs_league",
-    "soccer_uefa_europa_league",
-]
-
-KICKTIPP_LABELS = {
-    "soccer_germany_bundesliga":  "1. Bundesliga",
-    "soccer_germany_bundesliga2": "2. Bundesliga",
-    "soccer_epl":                 "Premier League",
-    "soccer_spain_la_liga":       "La Liga",
-    "soccer_italy_serie_a":       "Serie A",
-    "soccer_france_ligue_one":    "Ligue 1",
-    "soccer_uefa_champs_league":  "Champions League",
-    "soccer_uefa_europa_league":  "Europa League",
-}
 
 
 def current_season_codes(now: datetime | None = None) -> list[str]:
@@ -230,9 +137,6 @@ def load_creds() -> dict:
 # ═══════════════════════════════════════════════════════════════════════════════
 # THE ODDS API
 # ═══════════════════════════════════════════════════════════════════════════════
-
-ODDS_API_BASE = "https://api.the-odds-api.com/v4"
-
 
 def get_active_sports(api_key: str) -> list:
     r = _request_with_retry(f"{ODDS_API_BASE}/sports",
@@ -336,6 +240,39 @@ def bookie_consensus(match: dict) -> dict:
     for k, vals in sums.items():
         result[k] = float(np.mean(vals)) if vals else None
     return result
+
+
+def enrich_bets_with_market_data(bets: list, match: dict) -> None:
+    """Reichert Bet-Dicts mit Konsens-Daten und Overround an (für Confidence Scoring)."""
+    consensus = bookie_consensus(match)
+    # Overround berechnen
+    overrounds = []
+    for bm in match.get("bookmakers", []):
+        for market in bm.get("markets", []):
+            if market["key"] != "h2h":
+                continue
+            s = sum(1 / float(o["price"]) for o in market["outcomes"] if float(o["price"]) > 0)
+            if s > 0:
+                overrounds.append(s - 1)
+    avg_overround = float(np.mean(overrounds)) if overrounds else None
+
+    for b in bets:
+        b["overround"] = avg_overround
+        # Konsens-Prob für die getippte Seite ermitteln
+        outcome_side = None
+        tip = b.get("tip", "")
+        match_str = b.get("match", "")
+        parts = match_str.split(" – ", 1)
+        home = parts[0].strip() if parts else ""
+        away = parts[1].strip() if len(parts) > 1 else ""
+        if tip == home:
+            outcome_side = "home"
+        elif tip == away:
+            outcome_side = "away"
+        elif tip in ("Unentschieden", "Draw"):
+            outcome_side = "draw"
+        if outcome_side and consensus.get(outcome_side) is not None:
+            b["consensus_prob"] = consensus[outcome_side]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1054,7 +991,9 @@ def analyze_uefa_match(match: dict, elo_dict: dict,
                     "best_odds":  odds,
                     "edge_pct":   edge * 100,
                     "kelly_pct":  min(kelly, MAX_KELLY) * 100,
-                    "model_src":  f"Club-Elo ({int(elo_home)}/{int(elo_away)})",
+                    "model_src":  "ClubElo",
+                    "elo_home":   elo_home,
+                    "elo_away":   elo_away,
                 })
 
     # ── O/U via Poisson ─────────────────────────────────────────────────────
@@ -1209,6 +1148,10 @@ tr:hover td{background:rgba(0,240,255,0.04)}
       border-radius:4px;padding:2px 7px;font-size:0.75em}
 .league-header{color:var(--text);font-size:0.95em;margin:18px 0 4px 0;padding:0;border:none}
 .league-header .tag,.league-header .tag2,.league-header .tag3{font-size:0.85em;padding:3px 10px}
+details{margin:10px 0}
+details summary{list-style:none}
+details summary::-webkit-details-marker{display:none}
+details[open] summary{margin-bottom:10px}
 .footer{color:var(--dim);font-size:0.78em;margin-top:30px;
         border-top:1px solid var(--border);padding-top:14px}
 """
@@ -1598,7 +1541,7 @@ def build_uefa_table(bets: list) -> str:
     if not bets:
         return '<div class="empty">Keine UEFA Value Bets gefunden.</div>'
     headers = ["Spiel", "Typ", "Tipp", "Anstoß",
-               "Modell-%", "Beste Quote", "Edge-%", "Kelly-%", "Modell"]
+               "Modell-%", "Beste Quote", "Edge-%", "Kelly-%", "Modell", "Elo"]
     ths = "".join(f"<th>{h}</th>" for h in headers)
     html = ""
     for league, league_bets in _group_by_league(bets, UEFA_LABELS).items():
@@ -1607,6 +1550,9 @@ def build_uefa_table(bets: list) -> str:
         for b in league_bets:
             ec = edge_class(b["edge_pct"])
             typ_label = "1X2" if b["bet_type"] == "1x2" else "O/U"
+            elo_h = b.get("elo_home")
+            elo_a = b.get("elo_away")
+            elo_str = f"{int(elo_h)}/{int(elo_a)}" if elo_h and elo_a else "–"
             rows += f"""<tr>
           <td><strong>{b['match']}</strong></td>
           <td>{typ_label}</td>
@@ -1617,6 +1563,7 @@ def build_uefa_table(bets: list) -> str:
           <td class="{ec}">{b['edge_pct']:.1f}%</td>
           <td style="color:#58a6ff">{b['kelly_pct']:.1f}%</td>
           <td style="color:#8b949e">{b['model_src']}</td>
+          <td style="color:#8b949e">{elo_str}</td>
         </tr>"""
         html += f"<table><tr>{ths}</tr>{rows}</table>"
     return html
@@ -1709,8 +1656,68 @@ def build_backtesting_section() -> str:
     return html
 
 
+def build_wettplan_section(selected_bets: list) -> str:
+    """Erzeugt die Wettplan-Sektion mit Bankroll-Status und selektierten Bets."""
+    if not selected_bets:
+        return '<div class="empty">Kein Wettplan für heute — keine Bets selektiert.</div>'
+
+    budget = get_daily_budget()
+    dd = get_peak_and_drawdown()
+    total_stake = sum(b.get("stake_eur", 0) for b in selected_bets)
+    n_strong = sum(1 for b in selected_bets if b.get("tier") == "Strong Pick")
+    n_value = sum(1 for b in selected_bets if b.get("tier") == "Value Bet")
+
+    bankroll = budget["bankroll"]
+    risk_pct = (total_stake / bankroll * 100) if bankroll > 0 else 0
+
+    dd_class = "g" if dd["drawdown_pct"] < 5 else ("y" if dd["drawdown_pct"] < 15 else "o")
+
+    html = f"""
+<div class="summary">
+  <div class="card"><div class="val" style="color:var(--green)">{bankroll:.2f} €</div><div class="lbl">Bankroll</div></div>
+  <div class="card"><div class="val">{len(selected_bets)}</div><div class="lbl">Bets heute</div></div>
+  <div class="card"><div class="val">{total_stake:.2f} €</div><div class="lbl">Tagesrisiko ({risk_pct:.1f}%)</div></div>
+  <div class="card"><div class="val">{n_strong} / {n_value}</div><div class="lbl">Strong / Value</div></div>
+  <div class="card"><div class="val {dd_class}">{dd['drawdown_pct']:.1f}%</div><div class="lbl">Drawdown (Peak: {dd['peak']:.0f} €)</div></div>
+</div>
+
+<table>
+<tr>
+  <th>Tier</th><th>Spiel</th><th>Tipp</th><th>Anstoß</th>
+  <th>Score</th><th>Modell-%</th><th>Beste Quote</th>
+  <th>Edge-%</th><th>Stake</th>
+</tr>"""
+
+    for b in selected_bets:
+        tier = b.get("tier", "Value Bet")
+        if tier == "Strong Pick":
+            tier_badge = '<span style="background:var(--green);color:var(--bg);border-radius:4px;padding:2px 7px;font-size:0.75em;font-weight:600">Strong Pick</span>'
+        else:
+            tier_badge = '<span style="background:rgba(0,240,255,0.1);color:var(--cyan);border:1px solid var(--border);border-radius:4px;padding:2px 7px;font-size:0.75em">Value Bet</span>'
+
+        ec = edge_class(b.get("edge_pct", 0))
+        score = b.get("confidence_score", 0)
+        score_color = "var(--green)" if score >= 70 else ("var(--cyan)" if score >= 45 else "var(--dim)")
+
+        html += f"""<tr>
+  <td>{tier_badge}</td>
+  <td><strong>{b.get('match', '?')}</strong></td>
+  <td>{b.get('tip', '?')}</td>
+  <td>{format_dt(b.get('kick_off', ''))}</td>
+  <td style="color:{score_color};font-weight:700">{score:.0f}</td>
+  <td>{b.get('model_prob', 0)*100:.1f}%</td>
+  <td>{b.get('best_odds', 0):.2f}</td>
+  <td class="{ec}">{b.get('edge_pct', 0):.1f}%</td>
+  <td style="color:var(--green);font-weight:700">{b.get('stake_eur', 0):.2f} €</td>
+</tr>"""
+
+    html += "</table>"
+    return html
+
+
 def generate_html(football_bets: list, ou_bets: list,
-                  tennis_bets: list, uefa_bets: list) -> str:
+                  tennis_bets: list, uefa_bets: list,
+                  selected_bets: list | None = None) -> str:
     date_str  = datetime.now().strftime("%d.%m.%Y")
     timestamp = datetime.now().strftime("%d.%m.%Y %H:%M")
     real_tennis_bets = [b for b in tennis_bets if b.get("model_source") != "Konsens"]
@@ -1719,6 +1726,11 @@ def generate_html(football_bets: list, ou_bets: list,
     max_edge  = max(all_edges) if all_edges else 0.0
 
     quota_str = f"API-Quota: {ODDS_API_REMAINING}" if ODDS_API_REMAINING is not None else "API-Quota: ?"
+
+    if selected_bets is None:
+        selected_bets = []
+
+    wettplan_html = build_wettplan_section(selected_bets)
 
     return f"""<!DOCTYPE html>
 <html lang="de">
@@ -1729,6 +1741,9 @@ def generate_html(football_bets: list, ou_bets: list,
 </head>
 <body>
 <h1>📊 Sports Value Scanner — {date_str}</h1>
+
+<h2>🎯 Wettplan</h2>
+{wettplan_html}
 
 <div class="summary">
   <div class="card"><div class="val">{total}</div><div class="lbl">Value Bets gesamt</div></div>
@@ -1742,11 +1757,16 @@ def generate_html(football_bets: list, ou_bets: list,
 <div class="note">
   📌 <strong>Hinweis:</strong> Edge = (Modell-Wahrscheinlichkeit × Beste Quote) – 1.
   Nur Bets mit Edge ≥ {MIN_EDGE_PCT}% und ≤ {MAX_EDGE_PCT:.0f}% sowie Quote ≥ {MIN_ODDS} werden angezeigt.
-  Kelly-Empfehlung maximal {MAX_KELLY*100:.0f}% des Bankrolls.
+  Quarter-Kelly Bankroll-Management aktiv.
 </div>
 
 <h2>📈 Backtesting-Performance</h2>
 {build_backtesting_section()}
+
+<details>
+<summary style="cursor:pointer;color:var(--gold);font-size:1.1em;font-weight:600;margin:20px 0 10px">
+  📋 Alle Signale ({total}) — zum Aufklappen klicken
+</summary>
 
 <h2>⚽ Fußball Value Bets (Poisson-Modell, Time-Decay)</h2>
 {build_football_table(football_bets)}
@@ -1759,6 +1779,8 @@ def generate_html(football_bets: list, ou_bets: list,
 
 <h2>🎾 Tennis Value Bets (Elo-Modell, ATP + WTA, Surface-Bias)</h2>
 {build_tennis_table(tennis_bets)}
+
+</details>
 
 <div class="footer">
   Generiert: {timestamp} &nbsp;|&nbsp;
@@ -1874,16 +1896,18 @@ def main() -> int:
             for match in matches:
                 bets = analyze_football_match(match, model)
                 if bets:
+                    enrich_bets_with_market_data(bets, match)
                     all_football_bets.extend(bets)
                     for b in bets:
-                        log_prediction(_run_id, b, match_raw=match)
+                        b["_pred_id"] = log_prediction(_run_id, b, match_raw=match)
                         print(f"    ✓ VALUE: {b['match']} → {b['tip']} "
                               f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
                 ou_bets_match = analyze_football_ou(match, model)
                 if ou_bets_match:
+                    enrich_bets_with_market_data(ou_bets_match, match)
                     all_ou_bets.extend(ou_bets_match)
                     for b in ou_bets_match:
-                        log_prediction(_run_id, b, match_raw=match)
+                        b["_pred_id"] = log_prediction(_run_id, b, match_raw=match)
                         print(f"    ✓ O/U VALUE: {b['match']} → {b['tip']} "
                               f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
 
@@ -1937,9 +1961,10 @@ def main() -> int:
             for match in matches:
                 bets = analyze_tennis_match(match, title, combined_elo, combined_surface_elo)
                 if bets:
+                    enrich_bets_with_market_data(bets, match)
                     all_tennis_bets.extend(bets)
                     for b in bets:
-                        log_prediction(_run_id, b, match_raw=match)
+                        b["_pred_id"] = log_prediction(_run_id, b, match_raw=match)
                         print(f"    ✓ VALUE: {b['match']} → {b['tip']} "
                               f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
 
@@ -1981,9 +2006,10 @@ def main() -> int:
             for match in matches:
                 bets = analyze_uefa_match(match, club_elo_dict, euro_model)
                 if bets:
+                    enrich_bets_with_market_data(bets, match)
                     all_uefa_bets.extend(bets)
                     for b in bets:
-                        log_prediction(_run_id, b, match_raw=match)
+                        b["_pred_id"] = log_prediction(_run_id, b, match_raw=match)
                         typ = b["bet_type"].upper()
                         print(f"    ✓ UEFA VALUE [{typ}]: {b['match']} → {b['tip']} "
                               f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
@@ -2008,9 +2034,10 @@ def main() -> int:
                         # Tag als DFB-Pokal in den Bets setzen
                         for b in bets:
                             b["sport"] = dfb_key
+                        enrich_bets_with_market_data(bets, match)
                         all_uefa_bets.extend(bets)
                         for b in bets:
-                            log_prediction(_run_id, b, match_raw=match)
+                            b["_pred_id"] = log_prediction(_run_id, b, match_raw=match)
                             typ = b["bet_type"].upper()
                             print(f"    ✓ DFB-Pokal [{typ}]: {b['match']} → {b['tip']} "
                                   f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
@@ -2055,13 +2082,38 @@ def main() -> int:
                                     encoding="utf-8")
             print(f"  JSON: {kt_json_path}")
 
+    # ── BANKROLL & BET-SELEKTION ─────────────────────────────────────────────
+    all_bets_combined = all_football_bets + all_ou_bets + all_tennis_bets + all_uefa_bets
+
+    selected_bets = []
+    watch_bets = []
+
+    if all_bets_combined and not args.dry_run:
+        print(f"\n[🎯 Wettplan] {len(all_bets_combined)} Bets bewerten & selektieren …")
+        init_bankroll()
+        selected_bets, watch_bets = select_bets(all_bets_combined)
+
+        # DB-Predictions mit Selektions-Daten aktualisieren
+        for b in selected_bets + watch_bets:
+            pred_id = b.get("_pred_id")
+            if pred_id:
+                update_prediction_selection(
+                    pred_id,
+                    confidence_score=b.get("confidence_score", 0),
+                    tier=b.get("tier", "Watch"),
+                    stake_eur=b.get("stake_eur", 0),
+                    selected=b.get("selected", 0),
+                )
+
     # ── REPORT ──────────────────────────────────────────────────────────────
     print(f"\n[📊 Report] Football Bets: {len(all_football_bets)}")
     print(f"[📊 Report] O/U Bets:      {len(all_ou_bets)}")
     print(f"[📊 Report] Tennis Bets:   {len(all_tennis_bets)}")
     print(f"[📊 Report] UEFA Bets:     {len(all_uefa_bets)}")
+    print(f"[📊 Report] Wettplan:      {len(selected_bets)} selektiert")
 
-    html      = generate_html(all_football_bets, all_ou_bets, all_tennis_bets, all_uefa_bets)
+    html      = generate_html(all_football_bets, all_ou_bets, all_tennis_bets,
+                              all_uefa_bets, selected_bets)
     html_path = out_dir / "sports_signals.html"
     html_path.write_text(html, encoding="utf-8")
     print(f"[📊 Report] HTML: {html_path}")
@@ -2079,6 +2131,9 @@ def main() -> int:
             "BestOdds":   f"{b['best_odds']:.2f}",
             "Edge-%":     f"{b['edge_pct']:.1f}",
             "Kelly-%":    f"{b['kelly_pct']:.1f}",
+            "Score":      f"{b.get('confidence_score', 0):.0f}",
+            "Tier":       b.get("tier", ""),
+            "Stake":      f"{b.get('stake_eur', 0):.2f}",
             "λ-Heim":     f"{b['lam_home']:.2f}",
             "λ-Gast":     f"{b['lam_away']:.2f}",
         })
@@ -2093,6 +2148,9 @@ def main() -> int:
             "BestOdds":   f"{b['best_odds']:.2f}",
             "Edge-%":     f"{b['edge_pct']:.1f}",
             "Kelly-%":    f"{b['kelly_pct']:.1f}",
+            "Score":      f"{b.get('confidence_score', 0):.0f}",
+            "Tier":       b.get("tier", ""),
+            "Stake":      f"{b.get('stake_eur', 0):.2f}",
             "λ-Heim":     f"{b['lam_home']:.2f}",
             "λ-Gast":     f"{b['lam_away']:.2f}",
         })
@@ -2107,6 +2165,9 @@ def main() -> int:
             "BestOdds":   f"{b['best_odds']:.2f}",
             "Edge-%":     f"{b['edge_pct']:.1f}",
             "Kelly-%":    f"{b['kelly_pct']:.1f}",
+            "Score":      f"{b.get('confidence_score', 0):.0f}",
+            "Tier":       b.get("tier", ""),
+            "Stake":      f"{b.get('stake_eur', 0):.2f}",
             "Modell":     b["model_src"],
         }
         if b["bet_type"] == "ou":
@@ -2124,6 +2185,9 @@ def main() -> int:
             "BestOdds":   f"{b['best_odds']:.2f}",
             "Edge-%":     f"{b['edge_pct']:.1f}",
             "Kelly-%":    f"{b['kelly_pct']:.1f}",
+            "Score":      f"{b.get('confidence_score', 0):.0f}",
+            "Tier":       b.get("tier", ""),
+            "Stake":      f"{b.get('stake_eur', 0):.2f}",
             "Elo":        str(b["elo"]) if b["elo"] else "",
         })
 
@@ -2135,8 +2199,11 @@ def main() -> int:
     if _run_id is not None:
         resolve_results()
 
+    # ── BANKROLL SNAPSHOT ─────────────────────────────────────────────────
+    if not args.dry_run:
+        record_daily_snapshot(date_str)
+
     # ── TELEGRAM ALERTS ───────────────────────────────────────────────────
-    all_bets_combined = all_football_bets + all_ou_bets + all_tennis_bets + all_uefa_bets
     if all_bets_combined:
         print("\n[📱 Telegram] High-Edge Alerts …")
         send_high_edge_alerts(all_bets_combined, min_edge=10.0)

@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+"""
+Zentrale Konfiguration für den Sports Value Scanner.
+Alle Konstanten, die in sports_scanner.py, bet_selector.py und bankroll_manager.py
+verwendet werden.
+"""
+
+from datetime import datetime
+from pathlib import Path
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PFADE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+SCRIPT_DIR = Path(__file__).parent
+OUTPUT_DIR = SCRIPT_DIR / "output"
+CREDS_FILE = Path.home() / ".stock_scanner_credentials"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FUSSBALL-LIGEN
+# ═══════════════════════════════════════════════════════════════════════════════
+
+FOOTBALL_SPORTS = [
+    "soccer_germany_bundesliga",
+    "soccer_germany_bundesliga2",
+    "soccer_germany_liga3",
+    "soccer_epl",
+    "soccer_spain_la_liga",
+    "soccer_italy_serie_a",
+    "soccer_france_ligue_one",
+]
+
+SPORT_LABELS = {
+    "soccer_germany_bundesliga":       "1. Bundesliga",
+    "soccer_germany_bundesliga2":      "2. Bundesliga",
+    "soccer_germany_liga3":            "3. Liga",
+    "soccer_germany_dfb_pokal":        "DFB-Pokal",
+    "soccer_epl":                      "Premier League",
+    "soccer_spain_la_liga":            "La Liga",
+    "soccer_italy_serie_a":            "Serie A",
+    "soccer_france_ligue_one":         "Ligue 1",
+}
+
+FDCO_LEAGUES = {
+    "soccer_germany_bundesliga": "D1",
+    "soccer_germany_bundesliga2": "D2",
+    "soccer_epl": "E0",
+    "soccer_spain_la_liga": "SP1",
+    "soccer_italy_serie_a": "I1",
+    "soccer_france_ligue_one": "F1",
+}
+
+OPENLIGADB_BASE = "https://api.openligadb.de"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# VALUE BETTING SCHWELLWERTE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+MIN_EDGE_PCT = 3.0
+MAX_EDGE_PCT = 100.0
+MIN_ODDS     = 1.25
+MAX_KELLY    = 0.05
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TENNIS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+ELO_K_FACTOR  = 32
+ELO_INITIAL   = 1500
+ELO_YEARS     = list(range(datetime.now().year - 3, datetime.now().year + 1))
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# UEFA
+# ═══════════════════════════════════════════════════════════════════════════════
+
+UEFA_SPORTS = [
+    "soccer_uefa_champs_league",
+    "soccer_uefa_europa_league",
+    "soccer_uefa_europa_conference_league",
+]
+
+UEFA_LABELS = {
+    "soccer_uefa_champs_league":            "Champions League",
+    "soccer_uefa_europa_league":            "Europa League",
+    "soccer_uefa_europa_conference_league": "Conference League",
+    "soccer_germany_dfb_pokal":             "DFB-Pokal",
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CLUB-ELO
+# ═══════════════════════════════════════════════════════════════════════════════
+
+CLUBELO_URL_HTTPS = "https://api.clubelo.com/{date}"
+CLUBELO_URL_HTTP  = "http://api.clubelo.com/{date}"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# EUROPÄISCHES POISSON-MODELL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+EUROPEAN_FDCO_LEAGUES = [
+    "E0",   # Premier League
+    "SP1",  # La Liga
+    "I1",   # Serie A
+    "F1",   # Ligue 1
+    "D1",   # Bundesliga 1
+    "D2",   # Bundesliga 2
+]
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ODDS API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+ODDS_API_BASE = "https://api.the-odds-api.com/v4"
+MIN_ODDS_API_REMAINING = 5
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# KICKTIPP
+# ═══════════════════════════════════════════════════════════════════════════════
+
+KICKTIPP_FOOTBALL_SPORTS = [
+    "soccer_germany_bundesliga",
+    "soccer_germany_bundesliga2",
+    "soccer_epl",
+    "soccer_spain_la_liga",
+    "soccer_italy_serie_a",
+    "soccer_france_ligue_one",
+]
+
+KICKTIPP_UEFA_SPORTS = [
+    "soccer_uefa_champs_league",
+    "soccer_uefa_europa_league",
+]
+
+KICKTIPP_LABELS = {
+    "soccer_germany_bundesliga":  "1. Bundesliga",
+    "soccer_germany_bundesliga2": "2. Bundesliga",
+    "soccer_epl":                 "Premier League",
+    "soccer_spain_la_liga":       "La Liga",
+    "soccer_italy_serie_a":       "Serie A",
+    "soccer_france_ligue_one":    "Ligue 1",
+    "soccer_uefa_champs_league":  "Champions League",
+    "soccer_uefa_europa_league":  "Europa League",
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BANKROLL-MANAGEMENT (NEU)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+STARTING_BANKROLL = 100.0       # EUR
+KELLY_FRACTION = 0.25           # Quarter-Kelly
+MAX_DAILY_BETS = 8              # Max 8 Bets pro Tag
+MAX_DAILY_RISK_PCT = 0.15       # Max 15% der Bankroll pro Tag
+MIN_STAKE_EUR = 1.0             # Minimum-Einsatz
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BET-SELEKTOR: CONFIDENCE SCORING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Gewichte für Confidence Score (Summe = 1.0)
+CONFIDENCE_WEIGHTS = {
+    "edge_quality":       0.30,
+    "model_reliability":  0.25,
+    "odds_quality":       0.15,
+    "market_consensus":   0.15,
+    "data_depth":         0.15,
+}
+
+# Tier-Schwellen
+TIER_STRONG_PICK = 70   # Score >= 70 → Strong Pick
+TIER_VALUE_BET   = 45   # Score >= 45 → Value Bet
+# Score < 45 → Watch (nur beobachten)
