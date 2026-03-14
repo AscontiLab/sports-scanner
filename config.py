@@ -151,6 +151,7 @@ KELLY_FRACTION = 0.25           # Quarter-Kelly
 MAX_DAILY_BETS = 8              # Max 8 Bets pro Tag
 MAX_DAILY_RISK_PCT = 0.15       # Max 15% der Bankroll pro Tag
 MIN_STAKE_EUR = 1.0             # Minimum-Einsatz
+MAX_SAME_OUTCOME = 2            # Max gleiche Outcome-Art (z.B. max 2x Unentschieden)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # BET-SELEKTOR: CONFIDENCE SCORING
@@ -158,14 +159,30 @@ MIN_STAKE_EUR = 1.0             # Minimum-Einsatz
 
 # Gewichte für Confidence Score (Summe = 1.0)
 CONFIDENCE_WEIGHTS = {
-    "edge_quality":       0.30,
-    "model_reliability":  0.25,
-    "odds_quality":       0.15,
-    "market_consensus":   0.15,
-    "data_depth":         0.15,
+    "edge_quality":       0.15,
+    "model_reliability":  0.30,
+    "odds_quality":       0.10,
+    "market_consensus":   0.20,
+    "data_depth":         0.10,
+    "odds_preference":    0.15,
 }
+
+# Odds-Praeferenz: Bevorzugt moderate Quoten, daempft extreme Aussenseiter
+ODDS_PREF_SWEET_SPOT = (1.50, 3.00)   # Optimaler Odds-Bereich → Score 100
+ODDS_PREF_MAX = 8.0                    # Ab hier Score 0
 
 # Tier-Schwellen
 TIER_STRONG_PICK = 70   # Score >= 70 → Strong Pick
 TIER_VALUE_BET   = 45   # Score >= 45 → Value Bet
 # Score < 45 → Watch (nur beobachten)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SAFETY FILTERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+MAX_MODEL_MARKET_GAP = 0.15           # Max model_prob - consensus_prob bevor auto-Watch
+EDGE_SKEPTICISM_THRESHOLD = 20.0      # Edge% ab dem Skeptizismus greift
+ODDS_SKEPTICISM_THRESHOLD = 3.5       # Nur bei Odds ueber diesem Wert
+MODEL_TRUST_MIN_BETS = 20             # Min. Bets bevor Win-Rate-Adjustment greift
+MODEL_TRUST_EXPECTED_WIN_RATE = 0.40  # Win-Rate bei der Trust = 1.0
+MODEL_TRUST_FLOOR = 0.05             # Minimaler Trust-Multiplikator

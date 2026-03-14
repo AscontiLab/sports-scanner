@@ -15,6 +15,15 @@ from config import (
     MAX_DAILY_BETS,
     MAX_DAILY_RISK_PCT,
     MIN_STAKE_EUR,
+    MAX_SAME_OUTCOME,
+    MAX_MODEL_MARKET_GAP,
+    EDGE_SKEPTICISM_THRESHOLD,
+    ODDS_SKEPTICISM_THRESHOLD,
+    MODEL_TRUST_MIN_BETS,
+    MODEL_TRUST_EXPECTED_WIN_RATE,
+    MODEL_TRUST_FLOOR,
+    ODDS_PREF_SWEET_SPOT,
+    ODDS_PREF_MAX,
 )
 from bankroll_manager import calculate_stake, get_current_bankroll
 
@@ -81,11 +90,12 @@ def compute_confidence_score(bet: dict, model_stats: dict | None = None) -> floa
     Berechnet einen Confidence Score (0–100) für eine Bet.
 
     Faktoren (gewichtet):
-    - Edge-Qualität (30%): 3% → 0, 15%+ → 30
-    - Modell-Zuverlässigkeit (25%): ROI × Trust-Faktor
-    - Odds-Qualität (15%): Niedriger Overround = besser
-    - Markt-Konsens-Abstand (15%): Kleine Abweichung = stabiler
-    - Datentiefe (15%): Mehr Training-Matches = höher
+    - Edge-Qualität (15%): 3% → 0, 15%+ → 100, mit Skeptizismus bei Longshots
+    - Modell-Zuverlässigkeit (30%): ROI × Trust-Faktor (Win-Rate-adjusted)
+    - Odds-Qualität (10%): Niedriger Overround = besser
+    - Markt-Konsens-Abstand (20%): Kleine Abweichung = stabiler
+    - Datentiefe (10%): Mehr Training-Matches = höher
+    - Odds-Präferenz (15%): Moderate Quoten (1.50–3.00) bevorzugt
     """
     if model_stats is None:
         model_stats = _get_model_stats()
@@ -93,19 +103,39 @@ def compute_confidence_score(bet: dict, model_stats: dict | None = None) -> floa
     w = CONFIDENCE_WEIGHTS
     score = 0.0
 
-    # 1. Edge-Qualität (30%): Linear 3% → 0, 15% → 30
+    # 1. Edge-Qualität: Linear 3% → 0, 15% → 100
     edge = bet.get("edge_pct", 0.0)
+    odds = bet.get("best_odds", bet.get("odds", 0.0))
     edge_score = min(max((edge - 3.0) / 12.0, 0.0), 1.0) * 100
+
+    # Edge-Skeptizismus: Hohe Edges auf hohe Odds werden gedaempft
+    if edge > EDGE_SKEPTICISM_THRESHOLD and odds > ODDS_SKEPTICISM_THRESHOLD:
+        excess_edge = edge - EDGE_SKEPTICISM_THRESHOLD
+        skepticism_penalty = min(0.7, excess_edge / 50.0)
+        edge_score *= (1.0 - skepticism_penalty)
+
     score += w["edge_quality"] * edge_score
 
-    # 2. Modell-Zuverlässigkeit (25%): ROI + Trust-Faktor
+    # 2. Modell-Zuverlaessigkeit: ROI + Trust-Faktor mit Win-Rate-Adjustment
     model_src = (
         bet.get("model_source")
         or _infer_model_source(bet)
     )
     stats = model_stats.get(model_src, {})
     resolved = stats.get("resolved", 0)
-    trust = min(1.0, resolved / 100.0)  # 0–1, max bei 100 resolved Bets
+    won = stats.get("won", 0)
+
+    sample_trust = min(1.0, resolved / 100.0)
+
+    if resolved >= MODEL_TRUST_MIN_BETS:
+        win_rate = won / resolved
+        trust_modifier = min(1.0, win_rate / MODEL_TRUST_EXPECTED_WIN_RATE)
+        trust_modifier = max(MODEL_TRUST_FLOOR, trust_modifier)
+    else:
+        trust_modifier = 0.5  # neutral bis genug Daten
+
+    trust = sample_trust * trust_modifier
+
     roi = stats.get("roi_pct", 0.0)
     # ROI-Score: -20% → 0, 0% → 50, +20% → 100
     roi_score = min(max((roi + 20.0) / 40.0, 0.0), 1.0) * 100
@@ -132,11 +162,25 @@ def compute_confidence_score(bet: dict, model_stats: dict | None = None) -> floa
         consensus_score = 50  # neutral wenn unbekannt
     score += w["market_consensus"] * consensus_score
 
-    # 5. Datentiefe (15%)
+    # 5. Datentiefe
     training = _get_training_matches_count()
     # 200 Matches → 50, 1000+ → 100
     depth_score = min(max(training / 1000.0, 0.0), 1.0) * 100
     score += w["data_depth"] * depth_score
+
+    # 6. Odds-Praeferenz: Sweet Spot 1.50–3.00 → 100, ab 8.0 → 0
+    low, high = ODDS_PREF_SWEET_SPOT
+    if odds <= 0:
+        odds_pref_score = 0
+    elif low <= odds <= high:
+        odds_pref_score = 100
+    elif odds < low:
+        # Unter Sweet Spot (z.B. 1.20): leicht reduziert
+        odds_pref_score = max(0, 100 - (low - odds) * 200)
+    else:
+        # Ueber Sweet Spot: linear abfallend bis ODDS_PREF_MAX
+        odds_pref_score = max(0, 100 * (1.0 - (odds - high) / (ODDS_PREF_MAX - high)))
+    score += w["odds_preference"] * odds_pref_score
 
     return round(min(max(score, 0), 100), 1)
 
@@ -173,6 +217,24 @@ def _bet_market_type(bet: dict) -> str:
     if raw == "tennis":
         return "tennis"
     return "1x2"
+
+
+def _outcome_type(bet: dict) -> str:
+    """Klassifiziert den Outcome-Typ: 'draw', 'over', 'under', 'home', 'away'."""
+    tip = bet.get("tip", "").lower()
+    if "unentschieden" in tip or tip == "x" or tip == "draw":
+        return "draw"
+    if tip.startswith("über") or tip.startswith("over"):
+        return "over"
+    if tip.startswith("unter") or tip.startswith("under"):
+        return "under"
+    # Home vs Away anhand outcome_side
+    side = bet.get("outcome_side", "").lower()
+    if side == "home":
+        return "home_win"
+    if side == "away":
+        return "away_win"
+    return "other"
 
 
 def filter_correlated_bets(bets: list) -> list:
@@ -227,6 +289,23 @@ def select_bets(all_bets: list, bankroll: float | None = None) -> tuple[list, li
         bet["confidence_score"] = compute_confidence_score(bet, model_stats)
         bet["tier"] = assign_tier(bet["confidence_score"])
 
+    # 1b. Market Disagreement Filter
+    market_gap_count = 0
+    for bet in all_bets:
+        consensus = bet.get("consensus_prob")
+        model_prob = bet.get("model_prob", 0.0)
+        if consensus and consensus > 0:
+            gap = model_prob - consensus
+            if gap > MAX_MODEL_MARKET_GAP:
+                bet["tier"] = "Watch"
+                bet["market_gap_flag"] = True
+                bet["confidence_score"] = min(bet["confidence_score"], TIER_VALUE_BET - 1)
+                market_gap_count += 1
+
+    if market_gap_count > 0:
+        print(f"[Bet-Selektor] {market_gap_count} Bets wegen Market-Gap > "
+              f"{MAX_MODEL_MARKET_GAP*100:.0f}pp auf Watch gesetzt (MKT)")
+
     # 2. Korrelations-Filter
     filtered = filter_correlated_bets(all_bets)
 
@@ -242,10 +321,16 @@ def select_bets(all_bets: list, bankroll: float | None = None) -> tuple[list, li
     # 4. Erst heute füllen, dann Rest mit später auffüllen
     selected = []
     total_risk = 0.0
+    outcome_counts: dict[str, int] = {}
 
     for bet in today_candidates + later_candidates:
         if len(selected) >= MAX_DAILY_BETS:
             break
+
+        # Outcome-Diversifikation: Max N gleiche Outcome-Art
+        outcome_type = _outcome_type(bet)
+        if outcome_counts.get(outcome_type, 0) >= MAX_SAME_OUTCOME:
+            continue
 
         # Stake berechnen
         stake = calculate_stake(bet.get("kelly_pct", 0), bankroll)
@@ -262,6 +347,7 @@ def select_bets(all_bets: list, bankroll: float | None = None) -> tuple[list, li
         bet["stake_eur"] = stake
         bet["selected"] = 1
         total_risk += stake
+        outcome_counts[outcome_type] = outcome_counts.get(outcome_type, 0) + 1
         selected.append(bet)
 
     n_today = sum(1 for b in selected if _is_today(b.get("kick_off", "")))
