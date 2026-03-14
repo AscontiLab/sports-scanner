@@ -494,6 +494,7 @@ def fit_poisson_model(df: pd.DataFrame, decay_rate: float = 0.005) -> dict:
         "defense":  {t: x[n_teams + i] for t, i in idx.items()},
         "home_adv": float(x[-1]),
         "teams":    teams,
+        "training_matches": int(len(df)),
     }
 
 
@@ -691,10 +692,10 @@ def _detect_surface(tournament_name: str) -> str | None:
     return None
 
 
-def compute_tennis_elo(years: list) -> tuple[dict, dict]:
+def compute_tennis_elo(years: list) -> tuple[dict, dict, int]:
     """
     Berechnet Elo-Ratings aus historischen ATP-Matches.
-    Gibt (gesamt_elo, surface_elo) zurück.
+    Gibt (gesamt_elo, surface_elo, training_matches) zurück.
     surface_elo = {"Hard": {name: elo}, "Clay": {...}, "Grass": {...}}
     """
     from concurrent.futures import ThreadPoolExecutor
@@ -708,7 +709,7 @@ def compute_tennis_elo(years: list) -> tuple[dict, dict]:
             all_frames.append(df)
     if not all_frames:
         print("    Warning: Keine ATP-Daten geladen")
-        return {}, surface_elo
+        return {}, surface_elo, 0
 
     combined = pd.concat(all_frames, ignore_index=True)
     combined = combined.dropna(subset=["winner_name", "loser_name"])
@@ -742,7 +743,7 @@ def compute_tennis_elo(years: list) -> tuple[dict, dict]:
             s_elo[w] += ELO_K_FACTOR * (1 - se_w)
             s_elo[l] += ELO_K_FACTOR * (0 - se_l)
 
-    return elo, surface_elo
+    return elo, surface_elo, int(len(combined))
 
 
 def download_wta_year(year: int) -> pd.DataFrame | None:
@@ -756,9 +757,9 @@ def download_wta_year(year: int) -> pd.DataFrame | None:
         return None
 
 
-def compute_wta_elo(years: list) -> tuple[dict, dict]:
+def compute_wta_elo(years: list) -> tuple[dict, dict, int]:
     """Berechnet Elo-Ratings aus historischen WTA-Matches.
-    Gibt (gesamt_elo, surface_elo) zurück."""
+    Gibt (gesamt_elo, surface_elo, training_matches) zurück."""
     from concurrent.futures import ThreadPoolExecutor
     elo = {}
     surface_elo = {"Hard": {}, "Clay": {}, "Grass": {}}
@@ -770,7 +771,7 @@ def compute_wta_elo(years: list) -> tuple[dict, dict]:
             all_frames.append(df)
     if not all_frames:
         print("    Warning: Keine WTA-Daten geladen")
-        return {}, surface_elo
+        return {}, surface_elo, 0
 
     combined = pd.concat(all_frames, ignore_index=True)
     combined = combined.dropna(subset=["winner_name", "loser_name"])
@@ -802,7 +803,7 @@ def compute_wta_elo(years: list) -> tuple[dict, dict]:
             s_elo[w] += ELO_K_FACTOR * (1 - se_w)
             s_elo[l] += ELO_K_FACTOR * (0 - se_l)
 
-    return elo, surface_elo
+    return elo, surface_elo, int(len(combined))
 
 
 def predict_tennis_win_prob(elo_a: float, elo_b: float) -> float:
@@ -894,6 +895,7 @@ def analyze_football_match(match: dict, model: dict) -> list:
                 "lam_away":   probs["lam_away"],
                 "home_model": home_model,
                 "away_model": away_model,
+                "training_matches": model.get("training_matches"),
             })
     return bets
 
@@ -945,6 +947,7 @@ def analyze_football_ou(match: dict, model: dict) -> list:
                     "kelly_pct":  min(kelly, MAX_KELLY) * 100,
                     "lam_home":   lam_home,
                     "lam_away":   lam_away,
+                    "training_matches": model.get("training_matches"),
                 })
     return bets
 
@@ -994,6 +997,7 @@ def analyze_uefa_match(match: dict, elo_dict: dict,
                     "model_source":   "ClubElo",
                     "elo_home":       elo_home,
                     "elo_away":       elo_away,
+                    "training_matches": len(elo_dict),
                 })
 
     # ── O/U via Poisson ─────────────────────────────────────────────────────
@@ -1035,6 +1039,7 @@ def analyze_uefa_match(match: dict, elo_dict: dict,
                                 "model_source":   "Poisson",
                                 "lam_home":       lam_home,
                                 "lam_away":       lam_away,
+                                "training_matches": euro_model.get("training_matches"),
                             })
     return bets
 
@@ -1043,8 +1048,13 @@ def analyze_uefa_match(match: dict, elo_dict: dict,
 # TENNIS ANALYSE
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def analyze_tennis_match(match: dict, tournament: str,
-                         elo_dict: dict, surface_elo: dict | None = None) -> list:
+def analyze_tennis_match(
+    match: dict,
+    tournament: str,
+    elo_dict: dict,
+    surface_elo: dict | None = None,
+    training_matches: int = 0,
+) -> list:
     p1 = match["home_team"]
     p2 = match["away_team"]
 
@@ -1105,6 +1115,7 @@ def analyze_tennis_match(match: dict, tournament: str,
                 "kelly_pct":    min(kelly, MAX_KELLY) * 100,
                 "elo":          round(elo_val) if elo_val else None,
                 "model_source": model_source,
+                "training_matches": training_matches,
             })
     return bets
 
@@ -1919,8 +1930,8 @@ def main() -> int:
         with ThreadPoolExecutor(max_workers=2) as pool:
             atp_future = pool.submit(compute_tennis_elo, elo_years)
             wta_future = pool.submit(compute_wta_elo, elo_years)
-            atp_elo_dict, atp_surface_elo = atp_future.result()
-            wta_elo_dict, wta_surface_elo = wta_future.result()
+            atp_elo_dict, atp_surface_elo, atp_training_matches = atp_future.result()
+            wta_elo_dict, wta_surface_elo, wta_training_matches = wta_future.result()
         print(f"  ATP: {len(atp_elo_dict)} Spieler im Elo-Dict")
         for surf, sdict in atp_surface_elo.items():
             print(f"    {surf}: {len(sdict)} Spieler")
@@ -1930,6 +1941,7 @@ def main() -> int:
 
         # Kombiniertes Dict für Lookup (ATP + WTA)
         combined_elo = {**atp_elo_dict, **wta_elo_dict}
+        combined_tennis_training = atp_training_matches + wta_training_matches
         combined_surface_elo = {}
         for surf in ["Hard", "Clay", "Grass"]:
             combined_surface_elo[surf] = {**atp_surface_elo.get(surf, {}),
@@ -1960,7 +1972,13 @@ def main() -> int:
                 print(f"    Hinweis: API-Quota sehr niedrig ({ODDS_API_REMAINING}) – stoppe weitere Odds-Calls.")
                 break
             for match in matches:
-                bets = analyze_tennis_match(match, title, combined_elo, combined_surface_elo)
+                bets = analyze_tennis_match(
+                    match,
+                    title,
+                    combined_elo,
+                    combined_surface_elo,
+                    training_matches=combined_tennis_training,
+                )
                 if bets:
                     enrich_bets_with_market_data(bets, match)
                     all_tennis_bets.extend(bets)

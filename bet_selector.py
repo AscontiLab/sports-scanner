@@ -6,8 +6,6 @@ Bewertet alle Value Bets mit einem Confidence Score (0–100),
 ordnet Tiers zu und selektiert die Top-N Bets für den Wettplan.
 """
 
-from functools import lru_cache
-
 from config import (
     CONFIDENCE_WEIGHTS,
     TIER_STRONG_PICK,
@@ -66,23 +64,26 @@ def _get_model_stats() -> dict:
         return {}
 
 
-# Gecacht pro Lauf – wird nur einmal aus der DB gelesen
-@lru_cache(maxsize=1)
-def _get_training_matches_count() -> int:
-    """Liest die Anzahl der Training-Matches aus dem letzten Scan-Run."""
-    import sqlite3
-    from pathlib import Path
+def _get_training_matches_count(bet: dict, model_stats: dict) -> int:
+    """
+    Ermittelt die Datentiefe pro Bet.
 
-    db_path = Path(__file__).parent / "sports_backtesting.db"
-    try:
-        # Context-Manager für automatisches Schließen
-        with sqlite3.connect(db_path) as conn:
-            row = conn.execute(
-                "SELECT training_matches FROM scan_runs ORDER BY id DESC LIMIT 1"
-            ).fetchone()
-            return int(row[0]) if row and row[0] else 0
-    except Exception:
-        return 0
+    Bevorzugt explizite Trainingsdaten aus dem Scanner-Lauf und fällt sonst
+    konservativ auf historische Resolved-Bets des Modells zurück.
+    """
+    training = bet.get("training_matches")
+    if training is not None:
+        try:
+            return max(int(training), 0)
+        except (TypeError, ValueError):
+            pass
+
+    model_src = (
+        bet.get("model_source")
+        or _infer_model_source(bet)
+    )
+    stats = model_stats.get(model_src, {})
+    return int(stats.get("resolved", 0) or 0)
 
 
 def compute_confidence_score(bet: dict, model_stats: dict | None = None) -> float:
@@ -163,7 +164,7 @@ def compute_confidence_score(bet: dict, model_stats: dict | None = None) -> floa
     score += w["market_consensus"] * consensus_score
 
     # 5. Datentiefe
-    training = _get_training_matches_count()
+    training = _get_training_matches_count(bet, model_stats)
     # 200 Matches → 50, 1000+ → 100
     depth_score = min(max(training / 1000.0, 0.0), 1.0) * 100
     score += w["data_depth"] * depth_score

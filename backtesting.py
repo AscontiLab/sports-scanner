@@ -192,10 +192,13 @@ def _parse_teams(bet_dict: dict) -> tuple[str, str]:
     return home, away
 
 
-def _calc_consensus(match_raw: dict | None) -> tuple[float | None, float | None, str | None]:
+def _calc_market_meta(
+    match_raw: dict | None,
+    outcome_side: str | None = None,
+) -> tuple[float | None, float | None, str | None]:
     """
-    Berechnet Konsens-Wahrscheinlichkeit und Overround aus rohen Match-Daten.
-    Gibt (consensus_home_prob, overround, best_odds_bookie) zurück.
+    Berechnet outcome-spezifische Konsens-Wahrscheinlichkeit und Overround.
+    Gibt (consensus_prob, overround, best_odds_bookie) für die gewählte Seite zurück.
     Alle Werte können None sein wenn match_raw nicht verfügbar.
     """
     if not match_raw:
@@ -203,9 +206,9 @@ def _calc_consensus(match_raw: dict | None) -> tuple[float | None, float | None,
 
     home_name = match_raw.get("home_team", "")
     away_name = match_raw.get("away_team", "")
-    implied   = {"home": [], "draw": [], "away": []}
-    best_h    = 1.0
-    best_b    = None
+    implied = {"home": [], "draw": [], "away": []}
+    best_odds = {"home": 1.0, "draw": 1.0, "away": 1.0}
+    best_bookies = {"home": None, "draw": None, "away": None}
 
     for bm in match_raw.get("bookmakers", []):
         for market in bm.get("markets", []):
@@ -216,23 +219,28 @@ def _calc_consensus(match_raw: dict | None) -> tuple[float | None, float | None,
                 price = float(o["price"])
                 if o["name"] == home_name:
                     o_map["home"] = price
-                    if price > best_h:
-                        best_h = price
-                        best_b = bm.get("key")
                 elif o["name"] == away_name:
                     o_map["away"] = price
                 elif o["name"] == "Draw":
                     o_map["draw"] = price
+            for side, price in o_map.items():
+                if price > best_odds[side]:
+                    best_odds[side] = price
+                    best_bookies[side] = bm.get("key")
             total_impl = sum(1 / p for p in o_map.values() if p > 0)
             if total_impl > 0:
                 for k, p in o_map.items():
                     implied[k].append((1 / p) / total_impl)
 
     if not implied["home"]:
-        return None, None, best_b
+        fallback_bookie = best_bookies.get(outcome_side) if outcome_side else None
+        return None, None, fallback_bookie
 
     import numpy as np
-    consensus_home = float(np.mean(implied["home"]))
+    consensus_probs = {
+        side: float(np.mean(values)) if values else None
+        for side, values in implied.items()
+    }
 
     # Overround: Schnitt der (sum(1/odds) - 1) über alle Bookies
     overrounds = []
@@ -245,7 +253,9 @@ def _calc_consensus(match_raw: dict | None) -> tuple[float | None, float | None,
                 overrounds.append(s - 1)
     overround = float(np.mean(overrounds)) if overrounds else None
 
-    return consensus_home, overround, best_b
+    selected_consensus = consensus_probs.get(outcome_side) if outcome_side else None
+    selected_bookie = best_bookies.get(outcome_side) if outcome_side else None
+    return selected_consensus, overround, selected_bookie
 
 
 def _fetch_with_retry(url: str, retries: int = 3) -> list[dict]:
@@ -385,7 +395,7 @@ def log_prediction(
     home_team, away_team = _parse_teams(bet_dict)
     bet_type             = _infer_bet_type(bet_dict)
     outcome_side         = _infer_outcome_side(bet_dict)
-    consensus_prob, overround, best_bookie = _calc_consensus(match_raw)
+    consensus_prob, overround, best_bookie = _calc_market_meta(match_raw, outcome_side)
 
     # Modell-Source normalisieren
     model_source = (
