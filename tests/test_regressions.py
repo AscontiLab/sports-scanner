@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import backtesting
 import bankroll_manager
 import bet_selector
+import serve_output
 import sports_scanner
 
 
@@ -232,3 +233,15 @@ def test_write_hub_exports_preserves_other_systems(tmp_path):
 
     assert {item["system"] for item in runs} == {"sports-scanner", "stock-scanner"}
     assert {item["system"] for item in exported_signals} == {"sports-scanner", "stock-scanner"}
+
+
+def test_sort_signals_orders_by_priority_desc():
+    signals = [
+        {"title": "B", "priority": 55, "timing": {"event_time": "2026-03-14T10:00:00Z"}},
+        {"title": "A", "priority": 80, "timing": {"event_time": "2026-03-14T09:00:00Z"}},
+        {"title": "C", "priority": 80, "timing": {"event_time": "2026-03-14T11:00:00Z"}},
+    ]
+
+    sorted_signals = serve_output._sort_signals(signals)
+
+    assert [s["title"] for s in sorted_signals] == ["C", "A", "B"]

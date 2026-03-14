@@ -70,6 +70,20 @@ def _filter_records(records, qs):
     return filtered
 
 
+def _sort_signals(signals):
+    if not isinstance(signals, list):
+        return []
+    return sorted(
+        signals,
+        key=lambda r: (
+            int(r.get("priority", 0) or 0),
+            r.get("timing", {}).get("event_time", "") or "",
+            r.get("title", "") or "",
+        ),
+        reverse=True,
+    )
+
+
 class OutputHandler(SimpleHTTPRequestHandler):
 
     def _json_response(self, data, status=200):
@@ -132,6 +146,14 @@ class OutputHandler(SimpleHTTPRequestHandler):
         if path == "/api/hub-signals":
             signals = _read_json(BASE_DIRS["/hub/"] / "latest_signals.json")
             self._json_response(_filter_records(signals, qs))
+            return True
+
+        # --- /api/hub-top-signals ---
+        if path == "/api/hub-top-signals":
+            signals = _read_json(BASE_DIRS["/hub/"] / "latest_signals.json")
+            filtered = _filter_records(signals, qs)
+            selected = [s for s in filtered if s.get("status") in ("selected", "watch", "candidate")]
+            self._json_response(_sort_signals(selected))
             return True
 
         # --- /api/kicktipp-latest ---
