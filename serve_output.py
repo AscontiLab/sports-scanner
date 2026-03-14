@@ -51,6 +51,25 @@ def _count_csv_rows(path: Path) -> int:
         return 0
 
 
+def _filter_records(records, qs):
+    if not isinstance(records, list):
+        return []
+    filtered = records
+    system = qs.get("system", [""])[0]
+    status = qs.get("status", [""])[0]
+    limit = qs.get("limit", [""])[0]
+    if system:
+        filtered = [r for r in filtered if r.get("system") == system]
+    if status:
+        filtered = [r for r in filtered if r.get("status") == status]
+    if limit:
+        try:
+            filtered = filtered[:max(0, int(limit))]
+        except ValueError:
+            pass
+    return filtered
+
+
 class OutputHandler(SimpleHTTPRequestHandler):
 
     def _json_response(self, data, status=200):
@@ -101,6 +120,18 @@ class OutputHandler(SimpleHTTPRequestHandler):
                 "cfdCount": cfd_count,
                 "newsItems": news[:5],
             })
+            return True
+
+        # --- /api/hub-runs ---
+        if path == "/api/hub-runs":
+            runs = _read_json(BASE_DIRS["/hub/"] / "latest_runs.json")
+            self._json_response(_filter_records(runs, qs))
+            return True
+
+        # --- /api/hub-signals ---
+        if path == "/api/hub-signals":
+            signals = _read_json(BASE_DIRS["/hub/"] / "latest_signals.json")
+            self._json_response(_filter_records(signals, qs))
             return True
 
         # --- /api/kicktipp-latest ---

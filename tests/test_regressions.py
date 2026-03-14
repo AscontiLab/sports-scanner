@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -7,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import backtesting
 import bankroll_manager
 import bet_selector
+import sports_scanner
 
 
 def test_record_daily_snapshot_recomputes_same_day_bankroll(tmp_path):
@@ -145,3 +147,88 @@ def test_confidence_score_uses_bet_specific_training_matches():
     )
 
     assert high_depth > low_depth
+
+
+def test_normalize_hub_signal_builds_explainability_payload():
+    bet = {
+        "sport": "soccer_epl",
+        "match": "Arsenal – Chelsea",
+        "tip": "Chelsea",
+        "kick_off": "2026-03-14T18:00:00Z",
+        "type": "football",
+        "outcome_side": "away",
+        "model_prob": 0.54,
+        "consensus_prob": 0.48,
+        "edge_pct": 8.2,
+        "best_odds": 3.4,
+        "overround": 0.06,
+        "stake_eur": 7.5,
+        "training_matches": 4234,
+        "confidence_score": 78,
+        "tier": "Strong Pick",
+        "selected": 1,
+    }
+
+    signal = sports_scanner._normalize_hub_signal(bet, "sports-2026-03-14T09:30:00+00:00")
+
+    assert signal["system"] == "sports-scanner"
+    assert signal["status"] == "selected"
+    assert signal["priority"] == 78
+    assert signal["entity"]["market"] == "1x2"
+    assert signal["entity"]["side"] == "away"
+    assert signal["metrics"]["training_matches"] == 4234
+    assert signal["explainability"]["version"] == "v1"
+    assert signal["explainability"]["why_now"]
+    assert signal["explainability"]["drivers"]
+
+
+def test_write_hub_exports_preserves_other_systems(tmp_path):
+    hub_dir = tmp_path / "hub"
+    hub_dir.mkdir()
+    (hub_dir / "latest_runs.json").write_text(
+        '[{"run_id":"stock-1","system":"stock-scanner","generated_at":"2026-03-14T06:00:00Z"}]',
+        encoding="utf-8",
+    )
+    (hub_dir / "latest_signals.json").write_text(
+        '[{"signal_id":"stock:a","system":"stock-scanner","title":"NVDA"}]',
+        encoding="utf-8",
+    )
+
+    run_payload = {
+        "run_id": "sports-1",
+        "system": "sports-scanner",
+        "generated_at": "2026-03-14T09:00:00Z",
+        "status": "ok",
+        "summary": {"total_candidates": 1, "selected_count": 1, "watch_count": 0, "warnings_count": 0},
+    }
+    signals = [
+        {
+            "signal_id": "sports:a",
+            "run_id": "sports-1",
+            "system": "sports-scanner",
+            "category": "bet",
+            "status": "selected",
+            "priority": 80,
+            "title": "Chelsea @ 3.40",
+            "entity": {},
+            "timing": {},
+            "metrics": {},
+            "explainability": {
+                "summary": "x",
+                "why_now": ["x"],
+                "model_basis": ["x"],
+                "confidence_reason": ["x"],
+                "risk_flags": ["x"],
+                "invalidators": ["x"],
+                "version": "v1",
+            },
+        }
+    ]
+
+    sports_scanner._write_hub_exports(run_payload, signals, hub_dir=hub_dir)
+
+    runs = json.loads((hub_dir / "latest_runs.json").read_text(encoding="utf-8"))
+    exported_signals = json.loads((hub_dir / "latest_signals.json").read_text(encoding="utf-8"))
+
+    assert {item["system"] for item in runs} == {"sports-scanner", "stock-scanner"}
+    assert {item["system"] for item in exported_signals} == {"sports-scanner", "stock-scanner"}

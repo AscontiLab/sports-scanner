@@ -53,6 +53,7 @@ warnings.filterwarnings("ignore")
 
 # Mutable global — nicht in config.py
 ODDS_API_REMAINING: int | None = None
+HUB_DIR = SCRIPT_DIR.parent / "hub"
 
 
 def current_season_codes(now: datetime | None = None) -> list[str]:
@@ -84,6 +85,267 @@ def get_elo_years(now: datetime | None = None, span: int = 4) -> list[int]:
     if now is None:
         now = datetime.now()
     return list(range(now.year - (span - 1), now.year + 1))
+
+
+def _slugify(value: str) -> str:
+    value = value.lower().strip()
+    cleaned = []
+    for ch in value:
+        if ch.isalnum():
+            cleaned.append(ch)
+        elif ch in (" ", "-", "_", "/", ":", ".", "–"):
+            cleaned.append("-")
+    slug = "".join(cleaned).strip("-")
+    while "--" in slug:
+        slug = slug.replace("--", "-")
+    return slug or "unknown"
+
+
+def _competition_label(bet: dict) -> str:
+    sport = bet.get("sport", "")
+    if sport in SPORT_LABELS:
+        return SPORT_LABELS[sport]
+    if sport in UEFA_LABELS:
+        return UEFA_LABELS[sport]
+    return bet.get("tournament") or sport or "Unbekannt"
+
+
+def _bet_market_label(bet: dict) -> str:
+    bet_type = (bet.get("type") or "").lower()
+    if bet_type in ("football", "1x2"):
+        return "1x2"
+    if bet_type in ("football_ou", "ou"):
+        return "totals"
+    if bet_type == "tennis":
+        return "match_winner"
+    return bet_type or "unknown"
+
+
+def _bet_side(bet: dict) -> str:
+    side = bet.get("outcome_side")
+    if side:
+        return side
+    tip = bet.get("tip", "")
+    match_str = bet.get("match", "")
+    parts = match_str.split(" – ", 1)
+    home = parts[0].strip() if parts else ""
+    away = parts[1].strip() if len(parts) > 1 else ""
+    if tip == home:
+        return "home"
+    if tip == away:
+        return "away"
+    if tip in ("Unentschieden", "Draw"):
+        return "draw"
+    if tip.startswith("Über") or tip.startswith("Over"):
+        return "over"
+    if tip.startswith("Unter") or tip.startswith("Under"):
+        return "under"
+    return "unknown"
+
+
+def _bet_status(bet: dict) -> str:
+    if bet.get("selected"):
+        return "selected"
+    if bet.get("tier") == "Watch":
+        return "watch"
+    return "candidate"
+
+
+def _build_signal_id(bet: dict) -> str:
+    parts = [
+        "sports",
+        _slugify(bet.get("sport", "unknown")),
+        _slugify(bet.get("match", "unknown")),
+        _slugify(_bet_side(bet)),
+        _slugify(bet.get("kick_off", "")),
+    ]
+    return ":".join(parts)
+
+
+def _build_sports_drivers(bet: dict) -> list[dict]:
+    drivers = []
+    consensus = bet.get("consensus_prob")
+    model_prob = bet.get("model_prob")
+    if consensus is not None and model_prob is not None:
+        gap_pp = (model_prob - consensus) * 100
+        drivers.append({
+            "label": "Model vs Market Gap",
+            "direction": "positive" if gap_pp >= 0 else "negative",
+            "value": f"{gap_pp:+.1f}pp",
+            "weight": 0.30,
+        })
+    if bet.get("edge_pct") is not None:
+        drivers.append({
+            "label": "Edge",
+            "direction": "positive" if bet.get("edge_pct", 0) >= 0 else "negative",
+            "value": f"{bet.get('edge_pct', 0):.1f}%",
+            "weight": 0.15,
+        })
+    if bet.get("confidence_score") is not None:
+        drivers.append({
+            "label": "Confidence",
+            "direction": "positive",
+            "value": f"{bet.get('confidence_score', 0):.0f}/100",
+            "weight": 0.20,
+        })
+    if bet.get("overround") is not None:
+        drivers.append({
+            "label": "Odds Quality",
+            "direction": "positive" if bet.get("overround", 1) <= 0.08 else "neutral",
+            "value": f"{bet.get('overround', 0) * 100:.1f}% overround",
+            "weight": 0.10,
+        })
+    if bet.get("training_matches") is not None:
+        drivers.append({
+            "label": "Data Depth",
+            "direction": "positive",
+            "value": f"{int(bet.get('training_matches', 0))} matches",
+            "weight": 0.10,
+        })
+    return drivers
+
+
+def _build_sports_explainability(bet: dict) -> dict:
+    model_prob = bet.get("model_prob")
+    consensus = bet.get("consensus_prob")
+    edge_pct = bet.get("edge_pct", 0.0)
+    confidence = bet.get("confidence_score", 0.0)
+    odds = bet.get("best_odds", 0.0)
+    overround = bet.get("overround")
+    market = _bet_market_label(bet)
+    model_source = bet.get("model_source") or ("Poisson" if market != "match_winner" else "Elo")
+    reasons_now = []
+    confidence_reasons = []
+    risk_flags = []
+    invalidators = []
+
+    if model_prob is not None and consensus is not None:
+        gap_pp = (model_prob - consensus) * 100
+        reasons_now.append(
+            f"Model probability {model_prob*100:.1f}% liegt bei {gap_pp:+.1f} Prozentpunkten zum Marktkonsens."
+        )
+        if gap_pp > 0:
+            confidence_reasons.append("Das Modell liegt ueber Markt und liefert damit eine spielbare Fehlbewertung.")
+        else:
+            risk_flags.append("Der Markt stuetzt die Modellmeinung nicht klar; das Signal lebt eher von der Quote.")
+    if odds:
+        reasons_now.append(f"Die beste verfuegbare Quote liegt bei {odds:.2f}.")
+    if edge_pct:
+        confidence_reasons.append(f"Die Edge liegt bei {edge_pct:.1f}% und stuetzt den positiven Erwartungswert.")
+    if overround is not None:
+        if overround <= 0.08:
+            confidence_reasons.append("Der Markt ist relativ sauber bepreist, der Overround bleibt moderat.")
+        else:
+            risk_flags.append(f"Der Overround ist mit {overround*100:.1f}% relativ hoch und verschlechtert die Signalqualitaet.")
+    if bet.get("training_matches"):
+        confidence_reasons.append(
+            f"Die Datentiefe fuer dieses Modell liegt bei {int(bet['training_matches'])} historischen Matches."
+        )
+    if bet.get("market_gap_flag"):
+        risk_flags.append("Der Market-Gap-Filter hat das Signal bereits skeptischer eingestuft.")
+    if odds >= 3.5:
+        risk_flags.append("Hohe Quote bedeutet mehr Varianz als bei moderaten Favoritenmärkten.")
+
+    invalidators.append("Starke Quotenbewegung oder neue Team-/Lineup-Informationen vor Kickoff.")
+    if market == "totals":
+        invalidators.append("Totals-Linie oder Marktstruktur veraendert sich vor dem Spiel deutlich.")
+    else:
+        invalidators.append("Das Modell verliert seine Relevanz, wenn Closing Odds die Edge weitgehend absorbieren.")
+
+    summary = (
+        f"{bet.get('tip', '?')} @ {odds:.2f} bleibt spielbar, "
+        f"weil Modell und Markt aktuell eine verwertbare Differenz zeigen."
+    )
+    if not confidence_reasons:
+        confidence_reasons.append("Das Signal ist nur schwach gestuetzt und sollte eher beobachtet werden.")
+    if not risk_flags:
+        risk_flags.append("Vor Kickoff bleiben Marktbewegungen und neue Informationen der wichtigste Unsicherheitsfaktor.")
+
+    return {
+        "summary": summary,
+        "why_now": reasons_now or ["Das Signal entsteht aus der aktuellen Modellbewertung gegen den Marktpreis."],
+        "model_basis": [
+            f"Primäre Modellquelle: {model_source}",
+            "Marktkonsens aus normalisierten Bookmaker-Quoten",
+            f"Markttyp: {market}",
+        ],
+        "confidence_reason": confidence_reasons,
+        "risk_flags": risk_flags,
+        "invalidators": invalidators,
+        "drivers": _build_sports_drivers(bet),
+        "version": "v1",
+    }
+
+
+def _normalize_hub_signal(bet: dict, run_ref: str) -> dict:
+    competition = _competition_label(bet)
+    side = _bet_side(bet)
+    market = _bet_market_label(bet)
+    status = _bet_status(bet)
+    explainability = _build_sports_explainability(bet)
+    title = f"{bet.get('tip', '?')} @ {bet.get('best_odds', 0):.2f}"
+    subtitle = f"{competition} | {bet.get('match', '?')}"
+    return {
+        "signal_id": _build_signal_id(bet),
+        "run_id": run_ref,
+        "system": "sports-scanner",
+        "category": "bet",
+        "status": status,
+        "priority": int(round(bet.get("confidence_score", 0))),
+        "title": title,
+        "subtitle": subtitle,
+        "entity": {
+            "primary": bet.get("tip"),
+            "secondary": bet.get("match"),
+            "market": market,
+            "side": side,
+            "competition": competition,
+        },
+        "timing": {
+            "event_time": bet.get("kick_off"),
+            "expires_at": bet.get("kick_off"),
+        },
+        "metrics": {
+            "model_prob": round(bet.get("model_prob", 0.0), 4) if bet.get("model_prob") is not None else None,
+            "consensus_prob": round(bet.get("consensus_prob", 0.0), 4) if bet.get("consensus_prob") is not None else None,
+            "edge_pct": round(bet.get("edge_pct", 0.0), 2),
+            "best_odds": round(bet.get("best_odds", 0.0), 2),
+            "overround": round(bet.get("overround", 0.0), 4) if bet.get("overround") is not None else None,
+            "stake_eur": round(bet.get("stake_eur", 0.0), 2),
+            "training_matches": int(bet.get("training_matches", 0) or 0),
+            "tier": bet.get("tier"),
+            "bookmaker": bet.get("best_odds_bookie"),
+        },
+        "explainability": explainability,
+    }
+
+
+def _upsert_hub_records(
+    path: Path,
+    records: list[dict],
+    key_field: str,
+    system_name: str,
+) -> None:
+    existing = []
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            existing = []
+    existing = [r for r in existing if r.get("system") != system_name]
+    merged = existing + records
+    merged.sort(key=lambda r: (r.get("generated_at") or r.get("run_id") or r.get(key_field) or ""), reverse=True)
+    path.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _write_hub_exports(
+    run_payload: dict,
+    signals: list[dict],
+    hub_dir: Path = HUB_DIR,
+) -> None:
+    hub_dir.mkdir(parents=True, exist_ok=True)
+    _upsert_hub_records(hub_dir / "latest_runs.json", [run_payload], "run_id", "sports-scanner")
+    _upsert_hub_records(hub_dir / "latest_signals.json", signals, "signal_id", "sports-scanner")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1823,6 +2085,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    scan_started_at = datetime.now(timezone.utc).replace(microsecond=0)
+    run_ref = f"sports-{scan_started_at.isoformat()}"
     print("=" * 60)
     print(f"  Sports Value Scanner — {datetime.now().strftime('%d.%m.%Y %H:%M')}")
     print("=" * 60)
@@ -1881,7 +2145,7 @@ def main() -> int:
                 print(f"    Modell-Fehler: {e}")
 
         _run_id = log_scan_run(
-            scanned_at=datetime.now().isoformat(),
+            scanned_at=scan_started_at.isoformat(),
             model_version=_git_hash,
             training_matches=_n_training,
         )
@@ -2214,6 +2478,27 @@ def main() -> int:
         csv_path = out_dir / "sports_signals.csv"
         pd.DataFrame(rows).to_csv(csv_path, index=False)
         print(f"[📊 Report] CSV:  {csv_path}")
+
+    if not args.dry_run:
+        hub_signals = [
+            _normalize_hub_signal(bet, run_ref)
+            for bet in sorted(selected_bets + watch_bets, key=lambda b: b.get("confidence_score", 0), reverse=True)
+        ]
+        run_payload = {
+            "run_id": run_ref,
+            "system": "sports-scanner",
+            "generated_at": scan_started_at.isoformat(),
+            "status": "ok",
+            "summary": {
+                "total_candidates": len(all_bets_combined),
+                "selected_count": len(selected_bets),
+                "watch_count": len(watch_bets),
+                "warnings_count": sum(1 for bet in selected_bets + watch_bets if bet.get("market_gap_flag")),
+            },
+        }
+        _write_hub_exports(run_payload, hub_signals)
+        print(f"[📊 Hub] JSON: {HUB_DIR / 'latest_runs.json'}")
+        print(f"[📊 Hub] JSON: {HUB_DIR / 'latest_signals.json'}")
 
     if _run_id is not None:
         resolve_results()
