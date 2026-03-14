@@ -1,162 +1,107 @@
 # Sports Value Scanner
 
-Findet Value Bets in Fussball und Tennis durch statistische Modelle und Quotenvergleich.
-Inkl. Kicktipp-Prognosen, Backtesting, Dashboards und E-Mail-Reports.
+## Ueberblick
 
-## Features
+Scanner fuer Value Bets in Fussball und Tennis. Das System kombiniert statistische Modelle, Quotenabgleich, Backtesting, E-Mail-Reports, Telegram-Alerts und Dashboard-Feeds.
 
-- **Value Bets:** Poisson- und Elo-Modelle vs. Buchmacherquoten, Edge >= 3 %
-- **Kicktipp:** Automatische Tipps fuer alle Kicktipp-Ligen (1X2 + Score)
-- **Backtesting:** SQLite-basierte Auswertung (ROI, Hit-Rate, Rolling Stats)
-- **Dashboards:** Neon Command Center Design via n8n Webhooks
-- **E-Mail:** Taeglicher HTML-Report per Gmail SMTP
-- **Alerts:** Telegram-Benachrichtigungen bei Value Bets
+## Zweck
 
-## Unterstuetzte Wettbewerbe
+- Wahrscheinlichkeiten fuer Sportereignisse modellieren
+- Quoten von Buchmachern gegen Eigenmodelle pruefen
+- Value Bets und Kicktipp-Prognosen erzeugen
+- Ergebnisse fuer Backtesting, Alerts und Dashboards bereitstellen
 
-| Sport | Wettbewerbe | Modell |
-|-------|-------------|--------|
-| Fussball | 1. + 2. Bundesliga, Premier League, La Liga, Serie A, Ligue 1 | Dixon-Coles Poisson |
-| Fussball | 3. Liga (OpenLigaDB) | Poisson |
-| UEFA | Champions League, Europa League, Conference League | Club-Elo + Poisson |
-| Tennis | ATP + WTA (alle aktiven Turniere) | Elo + Surface-Bias |
+## Bestandteile
 
-## Datenquellen
+- `sports_scanner.py`
+  - Hauptscanner fuer Modelle, Quotenvergleich und Reports
+- `backtesting.py`
+  - Speicherung und Auswertung vergangener Tipps
+- `alerts.py`
+  - Telegram-Benachrichtigungen
+- `serve_output.py`
+  - HTTP-Zugriff auf generierte Dateien fuer n8n
+- `send_sports_report.py`
+  - E-Mail-Versand des Sports-Reports
+- `send_kicktipp_report.py`
+  - E-Mail-Versand der Kicktipp-Prognosen
+- `run_sports_scanner.sh`
+  - Wrapper mit Locking, Logging und Folgeaktionen
 
-- **Fussball-Historie:** football-data.co.uk (Top-5-Ligen) + OpenLigaDB (3. Liga)
-- **UEFA-Elo:** api.clubelo.com
-- **Tennis-Historie:** github.com/JeffSackmann/tennis_atp + tennis_wta (4 Jahre)
-- **Live-Quoten:** The Odds API (v4)
+## Voraussetzungen
 
-## Dateien
+- Python 3.10+
+- Pakete aus `requirements.txt` oder mindestens:
+  - `requests`
+  - `pandas`
+  - `numpy`
+  - `scipy`
 
-| Datei | Beschreibung |
-|-------|-------------|
-| `sports_scanner.py` | Hauptscanner — Modelle, Analyse, HTML/CSV-Output, Kicktipp |
-| `backtesting.py` | SQLite-Persistence fuer Predictions + Ergebnisauswertung |
-| `alerts.py` | Telegram-Bot-Integration fuer Value-Bet-Alerts |
-| `serve_output.py` | HTTP-Server (Port 8099) fuer n8n-Dashboard-Zugriff |
-| `send_sports_report.py` | Sendet Sports-Report per Gmail |
-| `send_kicktipp_report.py` | Sendet Kicktipp-Report per Gmail |
-| `run_sports_scanner.sh` | Wrapper-Script fuer Cron mit Lock + Logging |
-
-## Installation
+## Einrichtung
 
 ```bash
-pip install requests pandas numpy scipy
+cd /home/claude-agent/sports-scanner
+pip install -r requirements.txt
 ```
 
 ## Konfiguration
 
-Credentials in `~/.stock_scanner_credentials` (chmod 600):
+Credentials werden in `~/.stock_scanner_credentials` erwartet:
 
-```
+```bash
 ODDS_API_KEY=...
 GMAIL_USER=...
 GMAIL_APP_PASSWORD=...
 GMAIL_RECIPIENT=...
-TELEGRAM_BOT_TOKEN=...      # optional
-TELEGRAM_CHAT_ID=...        # optional
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_CHAT_ID=...
 ```
 
-## Ausfuehrung
+## Nutzung
+
+Manueller Lauf:
 
 ```bash
-# Manuell
 python3 sports_scanner.py
-
-# Mit Log-Datei
-bash run_sports_scanner.sh
-
-# Nur Report senden
-python3 send_sports_report.py
-python3 send_kicktipp_report.py
 ```
 
-## Automatisierung
+Wrapper:
 
-Cron (taeglich 08:00 UTC):
+```bash
+bash run_sports_scanner.sh
+```
 
-```cron
-0 8 * * * /home/claude-agent/sports-scanner/run_sports_scanner.sh
+Einzelaktionen:
+
+```bash
+python3 send_sports_report.py
+python3 send_kicktipp_report.py
+python3 backtesting.py summary
+python3 backtesting.py open
+python3 backtesting.py resolve
 ```
 
 ## Output
 
-```
+```text
 output/YYYY-MM-DD/
-├── sports_signals.html      # HTML-Report (Value Bets)
-├── sports_signals.csv       # CSV-Export
-├── kicktipp_data.json       # Kicktipp-Prognosen (JSON)
-└── kicktipp_report.html     # Kicktipp-Report
+├── sports_signals.html
+├── sports_signals.csv
+├── kicktipp_data.json
+└── kicktipp_report.html
 ```
 
-## Dashboards (n8n)
+Weitere Artefakte:
 
-Alle Dashboards verwenden das "Neon Command Center" Design (Dark Theme, Cyan/Gold/Pink Akzente, Glassmorphism).
+- `sports_backtesting.db`
+- `logs/scanner_YYYY-MM-DD.log`
 
-| Dashboard | URL | n8n Workflow |
-|-----------|-----|-------------|
-| Hub (Startseite) | `/webhook/hub` | `oB1lnybKPVW8SsmH` |
-| Kicktipp | `/webhook/kicktipp` | `GW2llNiB5nNF0WDC` |
-| Sports Report | `/webhook/sports-report` | `P0mBA9lPXEpE1hQO` |
-| Stock Dashboard | `/webhook/stock-dashboard` | `Y4DA5bzf1FMF3JnS` |
+## Betriebshinweise
 
-## API-Server (serve_output.py)
+- Das Wrapper-Skript verhindert parallele Laeufe ueber eine Lock-Datei
+- Nach erfolgreichem Scan werden Folgeaktionen wie E-Mail-Reports ausgeloest
+- `serve_output.py` stellt generierte Dateien fuer Dashboards oder n8n bereit
 
-Laeuft auf Port 8099, erreichbar vom n8n-Docker via `172.28.0.1:8099`.
+## Status
 
-```
-GET /sports/{date}/sports_signals.html
-GET /stock/{date}/cfd_setups.csv
-GET /hub/ki_news.json
-PUT /hub/ki_news.json              # nur localhost/Docker
-GET /api/hub-summary               # Counts fuer Hub-Dashboard
-GET /api/kicktipp-latest           # Neueste Kicktipp-Daten
-GET /api/kicktipp-for-date?date=   # Kicktipp fuer bestimmtes Datum
-GET /api/kicktipp-stats            # Aggregierte Kicktipp-Statistiken
-```
-
-**Security:** Path-Traversal-Schutz (resolve + is_relative_to), PUT nur von localhost/Docker-Netz, 1 MB Upload-Limit.
-
-## Backtesting
-
-```bash
-python3 backtesting.py summary     # ROI-Auswertung
-python3 backtesting.py open        # Offene Bets
-python3 backtesting.py resolve     # Ergebnisse abrufen + abgleichen
-```
-
-## Schwellwerte
-
-```python
-MIN_EDGE_PCT = 3.0    # Mindest-Edge in %
-MAX_EDGE_PCT = 50.0   # Max-Edge (Filter Ausreisser)
-MIN_ODDS     = 1.25   # Mindestquote
-MAX_KELLY    = 0.05   # Max. Kelly-Anteil (5 %)
-```
-
-## Architektur
-
-```
-sports_scanner.py
-├── Fussball-Analyse
-│   ├── load_football_data()     → football-data.co.uk CSVs
-│   ├── train_poisson_model()    → Dixon-Coles MLE
-│   ├── predict_football()       → 1X2 Wahrscheinlichkeiten
-│   └── analyze_football_ou()    → Ueber/Unter
-├── Tennis-Analyse
-│   ├── compute_tennis_elo()     → ATP Elo (parallel download)
-│   ├── compute_wta_elo()        → WTA Elo (parallel download)
-│   └── analyze_tennis_match()   → Value Bets
-├── UEFA-Analyse
-│   ├── download_clubelo()       → Club-Elo Ratings
-│   └── analyze_uefa_match()     → Elo + Poisson
-├── Kicktipp
-│   └── collect_kicktipp_predictions() → Tipps mit Fallback-Kette
-├── Output
-│   ├── generate_html()          → Sports Report
-│   └── generate_kicktipp_html() → Kicktipp Report
-└── Backtesting
-    └── log_prediction()         → SQLite Persistence
-```
+Produktionsnaher Sports-Scanner mit Modellierung, Reporting, Backtesting und Alerting.
