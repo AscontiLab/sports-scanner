@@ -72,17 +72,19 @@ def _get_todays_bets() -> list[dict]:
 
 
 def _get_recent_bets(days: int = 7) -> list[dict]:
-    """Liest die letzten N Tage Selected Bets aus der DB."""
+    """Liest die letzten N Tage Selected Bets aus der DB (dedupliziert)."""
     conn = sqlite3.connect(_DB_PATH)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         """
-        SELECT sport_key, home_team, away_team, tip, best_odds,
+        SELECT sport_key, home_team, away_team, tip,
+               ROUND(best_odds, 2) AS best_odds,
                edge_pct, stake_eur, tier, confidence_score, bet_won,
                pnl_eur, commence_time, bet_type
         FROM predictions
         WHERE selected = 1
           AND bet_won IS NOT NULL
+        GROUP BY home_team, away_team, tip, ROUND(best_odds, 1)
         ORDER BY commence_time DESC
         LIMIT 50
         """,
