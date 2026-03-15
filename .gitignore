@@ -5,3 +5,8 @@ __pycache__/
 *.log
 *.db
 .scanner.lock
+.pytest_cache/
+
+# Backup-Dumps explizit tracken
+!backup/
+!backup/*.sql

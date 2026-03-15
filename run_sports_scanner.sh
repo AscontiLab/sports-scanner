@@ -55,6 +55,10 @@ else
     echo "Scanner fehlgeschlagen — kein E-Mail-Versand." >> "$LOG_FILE"
 fi
 
+# DB-Backup nach GitHub
+echo "DB-Backup …" >> "$LOG_FILE"
+bash "$SCRIPT_DIR/backup_db.sh" >> "$LOG_FILE" 2>&1
+
 # Logs älter als 30 Tage löschen
 find "$LOG_DIR" -name "scanner_*.log" -mtime +30 -delete
 
