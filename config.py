@@ -200,4 +200,5 @@ LEAGUE_MIN_EDGE = {
     "soccer_germany_bundesliga2": 15.0,
     "soccer_germany_liga3": 15.0,
     "soccer_france_ligue_one": 15.0,
+    "soccer_spain_la_liga": 15.0,        # 0% Win-Rate bei 4 Bets
 }

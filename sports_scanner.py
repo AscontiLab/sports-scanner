@@ -29,7 +29,7 @@ from pathlib import Path
 from scipy.stats import poisson
 from scipy.optimize import minimize
 from backtesting import init_db, log_scan_run, log_prediction, resolve_results, get_summary, update_prediction_selection
-from alerts import send_high_edge_alerts
+from alerts import send_high_edge_alerts, send_tuning_alert
 from config import (
     SCRIPT_DIR, OUTPUT_DIR, CREDS_FILE,
     FOOTBALL_SPORTS, SPORT_LABELS, FDCO_LEAGUES, OPENLIGADB_BASE,
@@ -2613,6 +2613,14 @@ def main() -> int:
     if all_bets_combined:
         print("\n[📱 Telegram] High-Edge Alerts …")
         send_high_edge_alerts(all_bets_combined, min_edge=10.0)
+
+    # ── TUNING ALERT (bei kritischer Performance) ─────────────────────────
+    if not args.dry_run:
+        from bankroll_manager import generate_tuning_report, update_bankroll_from_results
+        print("\n[📱 Telegram] Tuning-Alert …")
+        tuning = generate_tuning_report()
+        bk_info = update_bankroll_from_results()
+        send_tuning_alert(tuning, bk_info)
 
     print("\n✓ Fertig!")
     return 0

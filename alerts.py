@@ -77,3 +77,41 @@ def send_high_edge_alerts(all_bets: list, min_edge: float = 10.0) -> int:
         print(f"    Telegram: {len(high_edge)} High-Edge Bets gesendet")
         return len(high_edge)
     return 0
+
+
+def send_tuning_alert(tuning_report: dict, bankroll_info: dict) -> bool:
+    """
+    Sendet Telegram-Alert wenn Tuning-Report kritisch ist.
+    Wird nach jedem Resolve aufgerufen.
+    """
+    alert_level = tuning_report.get("alert_level", "ok")
+    if alert_level == "ok":
+        return False
+
+    bot_token, chat_id = load_telegram_creds()
+    if not bot_token or not chat_id:
+        return False
+
+    overall = tuning_report.get("overall", {})
+    recs = tuning_report.get("recommendations", [])
+    bk = bankroll_info.get("bankroll", 0)
+    pnl = bankroll_info.get("total_pnl", 0)
+
+    icon = "🔴" if alert_level == "critical" else "🟡"
+    lines = [
+        f"{icon} <b>Sports Scanner Tuning ({alert_level.upper()})</b>\n",
+        f"💰 Bankroll: {bk:.2f} EUR (PnL: {pnl:+.2f})",
+        f"📊 Win-Rate: {overall.get('win_rate', 0):.0f}% | ROI: {overall.get('roi', 0):.1f}%",
+        f"📈 Avg Edge: {overall.get('avg_edge', 0):.1f}% | Avg Odds: {overall.get('avg_odds', 0):.2f}",
+        "",
+    ]
+    if recs:
+        lines.append("<b>Empfehlungen:</b>")
+        for r in recs:
+            lines.append(f"⚠️ {r}")
+
+    message = "\n".join(lines)
+    if send_telegram(message, bot_token, chat_id):
+        print(f"    Telegram: Tuning-Alert ({alert_level}) gesendet")
+        return True
+    return False
