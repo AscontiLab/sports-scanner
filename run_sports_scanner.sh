@@ -43,6 +43,14 @@ if [ $EXIT_CODE -eq 0 ]; then
     else
         echo "HINWEIS: Kicktipp-Report nicht gesendet (ggf. keine Spiele)." >> "$LOG_FILE"
     fi
+
+    echo "Pushe Sports-Dashboard-Daten …" >> "$LOG_FILE"
+    /usr/bin/python3 "$SCRIPT_DIR/write_sports_dashboard_data.py" >> "$LOG_FILE" 2>&1
+    if [ $? -eq 0 ]; then
+        echo "Sports-Dashboard-Daten erfolgreich gepusht." >> "$LOG_FILE"
+    else
+        echo "HINWEIS: Sports-Dashboard-Daten konnten nicht gepusht werden." >> "$LOG_FILE"
+    fi
 else
     echo "Scanner fehlgeschlagen — kein E-Mail-Versand." >> "$LOG_FILE"
 fi

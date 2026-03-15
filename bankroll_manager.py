@@ -202,6 +202,275 @@ def record_daily_snapshot(
               f"(PnL: {day_pnl:+.2f}, Bets: {bets_placed}, Won: {bets_won})")
 
 
+def rebuild_all_snapshots() -> None:
+    """
+    Erstellt/aktualisiert Snapshots fuer ALLE Tage mit resolved Selected Bets.
+
+    Das Problem: record_daily_snapshot(today) schreibt nur den heutigen Snapshot,
+    aber Bets von gestern werden erst heute resolved. Diese Funktion baut alle
+    historischen Snapshots korrekt auf, kumulativ ab STARTING_BANKROLL.
+    """
+    with _connect() as conn:
+        # Alle Tage mit resolved selected Bets
+        days = conn.execute(
+            """
+            SELECT DISTINCT SUBSTR(commence_time, 1, 10) AS day
+            FROM predictions
+            WHERE selected = 1 AND bet_won IS NOT NULL
+            ORDER BY day
+            """
+        ).fetchall()
+
+        if not days:
+            print("[Bankroll] Keine resolved Bets — keine Snapshots zu rebuilden.")
+            return
+
+        config = conn.execute(
+            "SELECT starting_bankroll FROM bankroll_config WHERE id = 1"
+        ).fetchone()
+        starting = float(config["starting_bankroll"]) if config else STARTING_BANKROLL
+
+        cumulative_bankroll = starting
+        rebuilt = 0
+
+        for row in days:
+            day = row["day"]
+            stats = conn.execute(
+                """
+                SELECT
+                    COALESCE(SUM(pnl_eur), 0.0) AS day_pnl,
+                    COUNT(*) AS bets_placed,
+                    SUM(CASE WHEN bet_won = 1 THEN 1 ELSE 0 END) AS bets_won
+                FROM predictions
+                WHERE selected = 1
+                  AND SUBSTR(commence_time, 1, 10) = ?
+                  AND bet_won IS NOT NULL
+                """,
+                (day,),
+            ).fetchone()
+
+            day_pnl = float(stats["day_pnl"]) if stats["day_pnl"] else 0.0
+            bets_placed = int(stats["bets_placed"]) if stats["bets_placed"] else 0
+            bets_won = int(stats["bets_won"]) if stats["bets_won"] else 0
+
+            cumulative_bankroll += day_pnl
+
+            conn.execute(
+                """INSERT OR REPLACE INTO bankroll_snapshots
+                   (date, bankroll, day_pnl, bets_placed, bets_won)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (day, round(cumulative_bankroll, 2), round(day_pnl, 2),
+                 bets_placed, bets_won),
+            )
+            rebuilt += 1
+
+        print(f"[Bankroll] {rebuilt} Snapshots rebuilt. "
+              f"Bankroll: {starting:.2f} → {cumulative_bankroll:.2f} EUR")
+
+
+def generate_tuning_report() -> dict:
+    """
+    Analysiert die Performance und generiert Tuning-Empfehlungen.
+
+    Returns:
+        {
+            "overall": {...},
+            "by_league": [...],
+            "by_edge_range": [...],
+            "by_odds_range": [...],
+            "by_bet_type": [...],
+            "recommendations": [str, ...],
+            "alert_level": "ok" | "warning" | "critical"
+        }
+    """
+    with _connect() as conn:
+        # Gesamtperformance (selected resolved)
+        overall = conn.execute(
+            """
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN bet_won = 1 THEN 1 ELSE 0 END) AS won,
+                ROUND(SUM(pnl_eur), 2) AS total_pnl,
+                ROUND(SUM(stake_eur), 2) AS total_stake,
+                ROUND(AVG(edge_pct), 1) AS avg_edge,
+                ROUND(AVG(best_odds), 2) AS avg_odds
+            FROM predictions
+            WHERE selected = 1 AND bet_won IS NOT NULL
+            """
+        ).fetchone()
+
+        total = int(overall["total"]) if overall["total"] else 0
+        won = int(overall["won"]) if overall["won"] else 0
+        total_pnl = float(overall["total_pnl"]) if overall["total_pnl"] else 0.0
+        total_stake = float(overall["total_stake"]) if overall["total_stake"] else 0.0
+        win_rate = (won / total * 100) if total > 0 else 0.0
+        roi = (total_pnl / total_stake * 100) if total_stake > 0 else 0.0
+
+        overall_data = {
+            "total": total, "won": won, "win_rate": round(win_rate, 1),
+            "total_pnl": total_pnl, "total_stake": total_stake,
+            "roi": round(roi, 1),
+            "avg_edge": float(overall["avg_edge"]) if overall["avg_edge"] else 0.0,
+            "avg_odds": float(overall["avg_odds"]) if overall["avg_odds"] else 0.0,
+        }
+
+        # Performance nach Liga
+        by_league = []
+        rows = conn.execute(
+            """
+            SELECT sport_key,
+                COUNT(*) AS total,
+                SUM(CASE WHEN bet_won = 1 THEN 1 ELSE 0 END) AS won,
+                ROUND(SUM(pnl_eur), 2) AS pnl,
+                ROUND(SUM(stake_eur), 2) AS stake
+            FROM predictions
+            WHERE selected = 1 AND bet_won IS NOT NULL
+            GROUP BY sport_key ORDER BY pnl
+            """
+        ).fetchall()
+        for r in rows:
+            t = int(r["total"])
+            w = int(r["won"]) if r["won"] else 0
+            pnl = float(r["pnl"]) if r["pnl"] else 0.0
+            stake = float(r["stake"]) if r["stake"] else 0.0
+            by_league.append({
+                "league": r["sport_key"],
+                "total": t, "won": w,
+                "win_rate": round(w / t * 100, 1) if t else 0,
+                "pnl": pnl,
+                "roi": round(pnl / stake * 100, 1) if stake else 0,
+            })
+
+        # Performance nach Edge-Range
+        by_edge = []
+        for low, high, label in [(3, 10, "3-10%"), (10, 15, "10-15%"),
+                                  (15, 20, "15-20%"), (20, 100, "20%+")]:
+            r = conn.execute(
+                """
+                SELECT COUNT(*) AS total,
+                    SUM(CASE WHEN bet_won = 1 THEN 1 ELSE 0 END) AS won,
+                    ROUND(SUM(pnl_eur), 2) AS pnl
+                FROM predictions
+                WHERE selected = 1 AND bet_won IS NOT NULL
+                  AND edge_pct >= ? AND edge_pct < ?
+                """,
+                (low, high),
+            ).fetchone()
+            t = int(r["total"]) if r["total"] else 0
+            if t > 0:
+                w = int(r["won"]) if r["won"] else 0
+                by_edge.append({
+                    "range": label, "total": t, "won": w,
+                    "win_rate": round(w / t * 100, 1),
+                    "pnl": float(r["pnl"]) if r["pnl"] else 0.0,
+                })
+
+        # Performance nach Odds-Range
+        by_odds = []
+        for low, high, label in [(1.0, 2.5, "1.0-2.5"), (2.5, 3.5, "2.5-3.5"),
+                                  (3.5, 4.5, "3.5-4.5"), (4.5, 20, "4.5+")]:
+            r = conn.execute(
+                """
+                SELECT COUNT(*) AS total,
+                    SUM(CASE WHEN bet_won = 1 THEN 1 ELSE 0 END) AS won,
+                    ROUND(SUM(pnl_eur), 2) AS pnl
+                FROM predictions
+                WHERE selected = 1 AND bet_won IS NOT NULL
+                  AND best_odds >= ? AND best_odds < ?
+                """,
+                (low, high),
+            ).fetchone()
+            t = int(r["total"]) if r["total"] else 0
+            if t > 0:
+                w = int(r["won"]) if r["won"] else 0
+                by_odds.append({
+                    "range": label, "total": t, "won": w,
+                    "win_rate": round(w / t * 100, 1),
+                    "pnl": float(r["pnl"]) if r["pnl"] else 0.0,
+                })
+
+        # Performance nach Bet-Typ (1X2 vs O/U)
+        by_type = []
+        for bt, label in [("1x2", "1X2"), ("ou", "O/U")]:
+            r = conn.execute(
+                """
+                SELECT COUNT(*) AS total,
+                    SUM(CASE WHEN bet_won = 1 THEN 1 ELSE 0 END) AS won,
+                    ROUND(SUM(pnl_eur), 2) AS pnl,
+                    ROUND(SUM(stake_eur), 2) AS stake
+                FROM predictions
+                WHERE selected = 1 AND bet_won IS NOT NULL AND bet_type = ?
+                """,
+                (bt,),
+            ).fetchone()
+            t = int(r["total"]) if r["total"] else 0
+            if t > 0:
+                w = int(r["won"]) if r["won"] else 0
+                pnl = float(r["pnl"]) if r["pnl"] else 0.0
+                stake = float(r["stake"]) if r["stake"] else 0.0
+                by_type.append({
+                    "type": label, "total": t, "won": w,
+                    "win_rate": round(w / t * 100, 1),
+                    "pnl": pnl,
+                    "roi": round(pnl / stake * 100, 1) if stake else 0,
+                })
+
+    # Empfehlungen generieren
+    recommendations = []
+    alert_level = "ok"
+
+    if total >= 20 and win_rate < 30:
+        recommendations.append(
+            f"Win-Rate kritisch niedrig ({win_rate:.0f}%). "
+            "Scoring-Anpassung dringend noetig."
+        )
+        alert_level = "critical"
+    elif total >= 10 and win_rate < 40:
+        recommendations.append(
+            f"Win-Rate unter Erwartung ({win_rate:.0f}%). Beobachten."
+        )
+        if alert_level == "ok":
+            alert_level = "warning"
+
+    # Liga-spezifische Warnungen
+    for league in by_league:
+        if league["total"] >= 3 and league["win_rate"] == 0:
+            recommendations.append(
+                f"{league['league']}: 0% Win-Rate bei {league['total']} Bets. "
+                "Liga ausschliessen oder Min-Edge erhoehen."
+            )
+
+    # Edge-Range Warnungen
+    for edge in by_edge:
+        if edge["range"] == "20%+" and edge["total"] >= 3 and edge["win_rate"] < 15:
+            recommendations.append(
+                f"Edge 20%+: Nur {edge['win_rate']:.0f}% Win-Rate. "
+                "Hard Cap bei 20% Edge setzen."
+            )
+
+    # Odds-Warnungen
+    for odds in by_odds:
+        if odds["range"] == "4.5+" and odds["total"] >= 3 and odds["win_rate"] < 15:
+            recommendations.append(
+                f"Odds 4.5+: Nur {odds['win_rate']:.0f}% Win-Rate. "
+                "Max-Odds auf 4.50 beschraenken."
+            )
+
+    if roi < -20:
+        if alert_level != "critical":
+            alert_level = "critical"
+
+    return {
+        "overall": overall_data,
+        "by_league": by_league,
+        "by_edge_range": by_edge,
+        "by_odds_range": by_odds,
+        "by_bet_type": by_type,
+        "recommendations": recommendations,
+        "alert_level": alert_level,
+    }
+
+
 def update_bankroll_from_results() -> dict:
     """
     Aktualisiert die Bankroll basierend auf allen resolved Bets mit pnl_eur.

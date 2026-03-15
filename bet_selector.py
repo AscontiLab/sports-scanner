@@ -22,6 +22,10 @@ from config import (
     MODEL_TRUST_FLOOR,
     ODDS_PREF_SWEET_SPOT,
     ODDS_PREF_MAX,
+    MAX_EDGE_HARD_CAP,
+    MAX_ODDS_SELECTED,
+    OU_BONUS_POINTS,
+    LEAGUE_MIN_EDGE,
 )
 from bankroll_manager import calculate_stake, get_current_bankroll
 
@@ -130,7 +134,14 @@ def compute_confidence_score(bet: dict, model_stats: dict | None = None) -> floa
 
     if resolved >= MODEL_TRUST_MIN_BETS:
         win_rate = won / resolved
-        trust_modifier = min(1.0, win_rate / MODEL_TRUST_EXPECTED_WIN_RATE)
+        model_roi = stats.get("roi_pct", 0.0)
+        # Verschaerfter Trust-Modifier basierend auf ROI
+        if model_roi < -40:
+            trust_modifier = 0.1
+        elif model_roi < -20:
+            trust_modifier = 0.3
+        else:
+            trust_modifier = min(1.0, win_rate / MODEL_TRUST_EXPECTED_WIN_RATE)
         trust_modifier = max(MODEL_TRUST_FLOOR, trust_modifier)
     else:
         trust_modifier = 0.5  # neutral bis genug Daten
@@ -182,6 +193,11 @@ def compute_confidence_score(bet: dict, model_stats: dict | None = None) -> floa
         # Ueber Sweet Spot: linear abfallend bis ODDS_PREF_MAX
         odds_pref_score = max(0, 100 * (1.0 - (odds - high) / (ODDS_PREF_MAX - high)))
     score += w["odds_preference"] * odds_pref_score
+
+    # 7. O/U-Bonus: Over/Under-Wetten performen besser als 1X2
+    bet_type = bet.get("type", "").lower()
+    if bet_type in ("football_ou", "ou"):
+        score += OU_BONUS_POINTS
 
     return round(min(max(score, 0), 100), 1)
 
@@ -290,9 +306,42 @@ def select_bets(all_bets: list, bankroll: float | None = None) -> tuple[list, li
         bet["confidence_score"] = compute_confidence_score(bet, model_stats)
         bet["tier"] = assign_tier(bet["confidence_score"])
 
-    # 1b. Market Disagreement Filter
+    # 1b. HARD FILTERS: Edge-Cap, Max-Odds, Liga-Min-Edge
+    hard_filter_count = 0
+    for bet in all_bets:
+        edge = bet.get("edge_pct", 0.0)
+        odds = bet.get("best_odds", bet.get("odds", 0.0))
+        sport_key = bet.get("sport_key", "")
+        reason = None
+
+        # Hard Edge Cap: Edge > 20% → nicht prädiktiv
+        if edge > MAX_EDGE_HARD_CAP:
+            reason = f"EDGE>{MAX_EDGE_HARD_CAP:.0f}%"
+
+        # Max Odds: Longshots verlieren fast immer
+        elif odds > MAX_ODDS_SELECTED:
+            reason = f"ODDS>{MAX_ODDS_SELECTED:.1f}"
+
+        # Liga-spezifische Min-Edge
+        elif sport_key in LEAGUE_MIN_EDGE:
+            min_edge = LEAGUE_MIN_EDGE[sport_key]
+            if edge < min_edge:
+                reason = f"LIGA-EDGE<{min_edge:.0f}%"
+
+        if reason:
+            bet["tier"] = "Watch"
+            bet["hard_filter"] = reason
+            bet["confidence_score"] = min(bet["confidence_score"], TIER_VALUE_BET - 1)
+            hard_filter_count += 1
+
+    if hard_filter_count > 0:
+        print(f"[Bet-Selektor] {hard_filter_count} Bets durch Hard-Filter auf Watch gesetzt")
+
+    # 1c. Market Disagreement Filter
     market_gap_count = 0
     for bet in all_bets:
+        if bet.get("hard_filter"):
+            continue  # bereits gefiltert
         consensus = bet.get("consensus_prob")
         model_prob = bet.get("model_prob", 0.0)
         if consensus and consensus > 0:
@@ -306,6 +355,16 @@ def select_bets(all_bets: list, bankroll: float | None = None) -> tuple[list, li
     if market_gap_count > 0:
         print(f"[Bet-Selektor] {market_gap_count} Bets wegen Market-Gap > "
               f"{MAX_MODEL_MARKET_GAP*100:.0f}pp auf Watch gesetzt (MKT)")
+
+    # 1d. ROI-basierte Tier-Beschraenkung: Bei negativem Modell-ROI kein "Strong Pick"
+    for bet in all_bets:
+        if bet["tier"] == "Strong Pick":
+            model_src = bet.get("model_source") or _infer_model_source(bet)
+            stats = model_stats.get(model_src, {})
+            model_roi = stats.get("roi_pct", 0.0)
+            if model_roi < 0 and stats.get("resolved", 0) >= MODEL_TRUST_MIN_BETS:
+                bet["tier"] = "Value Bet"
+                bet["confidence_score"] = min(bet["confidence_score"], TIER_STRONG_PICK - 1)
 
     # 2. Korrelations-Filter
     filtered = filter_correlated_bets(all_bets)

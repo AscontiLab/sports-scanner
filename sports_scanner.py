@@ -43,7 +43,7 @@ from config import (
 )
 from bankroll_manager import (
     init_bankroll, get_current_bankroll, get_daily_budget,
-    record_daily_snapshot, get_peak_and_drawdown,
+    record_daily_snapshot, get_peak_and_drawdown, rebuild_all_snapshots,
 )
 from bet_selector import select_bets
 
@@ -2505,6 +2505,7 @@ def main() -> int:
 
     # ── BANKROLL SNAPSHOT ─────────────────────────────────────────────────
     if not args.dry_run:
+        rebuild_all_snapshots()
         record_daily_snapshot(date_str)
 
     # ── TELEGRAM ALERTS ───────────────────────────────────────────────────

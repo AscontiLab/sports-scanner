@@ -186,3 +186,18 @@ ODDS_SKEPTICISM_THRESHOLD = 3.5       # Nur bei Odds ueber diesem Wert
 MODEL_TRUST_MIN_BETS = 20             # Min. Bets bevor Win-Rate-Adjustment greift
 MODEL_TRUST_EXPECTED_WIN_RATE = 0.40  # Win-Rate bei der Trust = 1.0
 MODEL_TRUST_FLOOR = 0.05             # Minimaler Trust-Multiplikator
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# HARD FILTERS (basierend auf Performance-Analyse)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+MAX_EDGE_HARD_CAP = 20.0              # Edge > 20% → auto-Watch (nicht prädiktiv)
+MAX_ODDS_SELECTED = 4.50              # Odds > 4.50 → auto-Watch (Longshots verlieren)
+OU_BONUS_POINTS = 5.0                 # O/U-Wetten: +5 Punkte Confidence Bonus
+
+# Liga-spezifische Mindest-Edge (Ligen mit historisch 0% Win-Rate)
+LEAGUE_MIN_EDGE = {
+    "soccer_germany_bundesliga2": 15.0,
+    "soccer_germany_liga3": 15.0,
+    "soccer_france_ligue_one": 15.0,
+}

@@ -226,6 +226,21 @@ class OutputHandler(SimpleHTTPRequestHandler):
             })
             return True
 
+        # --- /api/sports-bankroll ---
+        if path == "/api/sports-bankroll":
+            data = _read_json(BASE_DIRS["/sports/"] / ".." / "output" / "sports_bankroll.json")
+            if not data:
+                # Fallback: direkt im sports output-Verzeichnis
+                data = _read_json(Path(__file__).parent / "output" / "sports_bankroll.json")
+            self._json_response(data or {})
+            return True
+
+        # --- /api/sports-tuning ---
+        if path == "/api/sports-tuning":
+            data = _read_json(Path(__file__).parent / "output" / "sports_tuning.json")
+            self._json_response(data or {})
+            return True
+
         return False
 
     def _check_path_traversal(self, file_path: Path, base_dir: Path) -> bool:
