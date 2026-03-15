@@ -800,6 +800,16 @@ def predict_ou(lam_home: float, lam_away: float, line: float) -> tuple[float, fl
     return p_over, p_under
 
 
+def predict_btts(lam_home: float, lam_away: float) -> float:
+    """
+    Berechnet P(Beide Teams treffen) via unabhängige Poisson-Verteilungen.
+    P(BTTS) = P(Heim >= 1) × P(Gast >= 1)
+    """
+    p_home_scores = 1.0 - float(poisson.pmf(0, lam_home))
+    p_away_scores = 1.0 - float(poisson.pmf(0, lam_away))
+    return p_home_scores * p_away_scores
+
+
 def predict_most_likely_score(lam_home: float, lam_away: float,
                               max_goals: int = 6,
                               tendency: str | None = None) -> tuple[int, int]:
@@ -1212,6 +1222,42 @@ def analyze_football_ou(match: dict, model: dict) -> list:
                     "training_matches": model.get("training_matches"),
                 })
     return bets
+
+
+def analyze_football_btts(match: dict, model: dict) -> list[dict]:
+    """
+    BTTS-Analyse (Beide Teams treffen) als Signal — kein Value Bet,
+    da The Odds API keinen BTTS-Markt anbietet.
+    Gibt pro Spiel max. 1 Signal zurück wenn P(BTTS) hoch genug ist.
+    """
+    home_api = match["home_team"]
+    away_api = match["away_team"]
+    model_teams = model["teams"]
+
+    home_model = find_team_in_model(home_api, model_teams)
+    away_model = find_team_in_model(away_api, model_teams)
+    if not home_model or not away_model:
+        return []
+
+    probs = predict_football(home_model, away_model, model)
+    if not probs:
+        return []
+
+    lam_home = probs["lam_home"]
+    lam_away = probs["lam_away"]
+    p_btts = predict_btts(lam_home, lam_away)
+    p_no_btts = 1.0 - p_btts
+
+    return [{
+        "match":      f"{home_api} – {away_api}",
+        "kick_off":   match["commence_time"],
+        "sport_key":  match.get("sport_key", ""),
+        "p_btts_yes": round(p_btts * 100, 1),
+        "p_btts_no":  round(p_no_btts * 100, 1),
+        "lam_home":   round(lam_home, 2),
+        "lam_away":   round(lam_away, 2),
+        "signal":     "Ja" if p_btts >= 0.55 else "Nein",
+    }]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1810,6 +1856,41 @@ def build_ou_table(bets: list) -> str:
     return html
 
 
+def build_btts_table(signals: list) -> str:
+    """Baut die BTTS-Signaltabelle (Beide Teams treffen)."""
+    if not signals:
+        return '<div class="empty">Keine BTTS-Signale vorhanden.</div>'
+    headers = ["Spiel", "Anstoß", "BTTS Ja", "BTTS Nein", "Signal", "λ Heim", "λ Gast"]
+    ths = "".join(f"<th>{h}</th>" for h in headers)
+    html = ""
+    for league, league_sigs in _group_by_league(signals, SPORT_LABELS).items():
+        html += f'<h3 class="league-header"><span class="tag2">{league}</span> ({len(league_sigs)})</h3>'
+        rows = ""
+        for s in sorted(league_sigs, key=lambda x: x["p_btts_yes"], reverse=True):
+            yes_pct = s["p_btts_yes"]
+            # Farbcodierung: >= 65% gruen, >= 55% gelb, sonst grau
+            if yes_pct >= 65:
+                clr = "var(--green, #00ff88)"
+                icon = "🟢"
+            elif yes_pct >= 55:
+                clr = "var(--gold, #c8aa6e)"
+                icon = "🟡"
+            else:
+                clr = "var(--dim, #6e6e80)"
+                icon = "⚪"
+            rows += f"""<tr>
+          <td><strong>{s['match']}</strong></td>
+          <td>{format_dt(s['kick_off'])}</td>
+          <td style="color:{clr};font-weight:700">{yes_pct:.1f}%</td>
+          <td style="color:#8b949e">{s['p_btts_no']:.1f}%</td>
+          <td>{icon} {s['signal']}</td>
+          <td style="color:#8b949e">{s['lam_home']:.2f}</td>
+          <td style="color:#8b949e">{s['lam_away']:.2f}</td>
+        </tr>"""
+        html += f"<table><tr>{ths}</tr>{rows}</table>"
+    return html
+
+
 def build_uefa_table(bets: list) -> str:
     if not bets:
         return '<div class="empty">Keine UEFA Value Bets gefunden.</div>'
@@ -1990,7 +2071,8 @@ def build_wettplan_section(selected_bets: list) -> str:
 
 def generate_html(football_bets: list, ou_bets: list,
                   tennis_bets: list, uefa_bets: list,
-                  selected_bets: list | None = None) -> str:
+                  selected_bets: list | None = None,
+                  btts_signals: list | None = None) -> str:
     date_str  = datetime.now().strftime("%d.%m.%Y")
     timestamp = datetime.now().strftime("%d.%m.%Y %H:%M")
     real_tennis_bets = [b for b in tennis_bets if b.get("model_source") != "Konsens"]
@@ -2055,6 +2137,17 @@ def generate_html(football_bets: list, ou_bets: list,
 
 </details>
 
+<details>
+<summary style="cursor:pointer;color:var(--gold);font-size:1.1em;font-weight:600;margin:20px 0 10px">
+  ⚽ Beide Teams treffen — BTTS-Signale ({len(btts_signals or [])}) — zum Aufklappen klicken
+</summary>
+<div class="note">
+  📌 <strong>Nur Analyse-Signal</strong> — keine Odds verfügbar (The Odds API bietet keinen BTTS-Markt).
+  Wahrscheinlichkeiten basieren auf dem Poisson-Modell (λ Heim × λ Gast).
+</div>
+{build_btts_table(btts_signals or [])}
+</details>
+
 <div class="footer">
   Generiert: {timestamp} &nbsp;|&nbsp;
   Fußball: Poisson MLE + Time-Decay (football-data.co.uk) &nbsp;|&nbsp;
@@ -2115,6 +2208,7 @@ def main() -> int:
 
     all_football_bets: list = []
     all_ou_bets:       list = []
+    all_btts_signals:  list = []
     all_tennis_bets:   list = []
     all_uefa_bets:     list = []
     all_sports = None  # Wird bei Bedarf von get_active_sports() befüllt
@@ -2186,6 +2280,8 @@ def main() -> int:
                         b["_pred_id"] = log_prediction(_run_id, b, match_raw=match)
                         print(f"    ✓ O/U VALUE: {b['match']} → {b['tip']} "
                               f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
+                btts_sigs = analyze_football_btts(match, model)
+                all_btts_signals.extend(btts_sigs)
 
         # ── TENNIS ──────────────────────────────────────────────────────────
         print("\n[🎾 Tennis] ATP + WTA Elo-Ratings parallel berechnen …")
@@ -2395,8 +2491,13 @@ def main() -> int:
     print(f"[📊 Report] UEFA Bets:     {len(all_uefa_bets)}")
     print(f"[📊 Report] Wettplan:      {len(selected_bets)} selektiert")
 
+    btts_yes_count = sum(1 for s in all_btts_signals if s["signal"] == "Ja")
+    print(f"[⚽ BTTS] {len(all_btts_signals)} Spiele analysiert, "
+          f"{btts_yes_count} mit BTTS-Signal (>= 55%)")
+
     html      = generate_html(all_football_bets, all_ou_bets, all_tennis_bets,
-                              all_uefa_bets, selected_bets)
+                              all_uefa_bets, selected_bets,
+                              btts_signals=all_btts_signals)
     html_path = out_dir / "sports_signals.html"
     html_path.write_text(html, encoding="utf-8")
     print(f"[📊 Report] HTML: {html_path}")
