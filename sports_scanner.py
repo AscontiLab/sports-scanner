@@ -1796,7 +1796,15 @@ def _group_by_league(bets: list, label_map: dict, key: str = "sport") -> dict:
     """Gruppiert Bets nach Liga/Turnier, sortiert innerhalb nach Anstoß + Edge."""
     groups = {}
     for b in bets:
-        league = label_map.get(b[key], b[key]) if label_map else b[key]
+        raw_league = (
+            b.get(key)
+            or b.get("sport")
+            or b.get("sport_key")
+            or b.get("tournament")
+            or b.get("league")
+            or "Unbekannt"
+        )
+        league = label_map.get(raw_league, raw_league) if label_map else raw_league
         groups.setdefault(league, []).append(b)
     for league in groups:
         groups[league].sort(key=lambda x: (x["kick_off"], -x["edge_pct"]))
