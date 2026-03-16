@@ -124,15 +124,20 @@ class OutputHandler(SimpleHTTPRequestHandler):
                 if p.is_file():
                     cfd_count = _count_csv_rows(p)
                     break
-            # KI-News
-            news = _read_json(BASE_DIRS["/hub/"] / "ki_news.json")
-            if not isinstance(news, list):
-                news = []
+            # KI-Tipps
+            tips = _read_json(BASE_DIRS["/hub/"] / "ki_tips.json")
+            if not isinstance(tips, list):
+                tips = []
+            # Code Review
+            review = _read_json(BASE_DIRS["/hub/"] / "code_review.json")
+            if not isinstance(review, dict):
+                review = {}
             self._json_response({
                 "kicktippCount": kicktipp_count,
                 "sportsCount": sports_count,
                 "cfdCount": cfd_count,
-                "newsItems": news[:5],
+                "tips": tips[:5],
+                "codeReview": review,
             })
             return True
 

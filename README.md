@@ -132,7 +132,7 @@ Weitere Artefakte:
 
 - `GET /sports/{date}/` — Tagesausgaben (HTML, CSV, Kicktipp)
 - `GET /stock/{date}/` — Stock Scanner Output (Cross-Referenz)
-- `GET /api/hub-summary` — Aggregierte Counts fuer Hub Dashboard
+- `GET /api/hub-summary` — Aggregierte Counts, KI-Tipps und Code-Review fuer Hub Dashboard
 - `GET /api/kicktipp-latest` — Neueste Kicktipp-Tipps
 - `GET /api/kicktipp-for-date?date=YYYY-MM-DD` — Tipps fuer Datum
 - `GET /api/kicktipp-stats` — Aggregierte Stats (30 Tage)
@@ -157,6 +157,14 @@ Datengetriebenes Tuning basierend auf Backtesting (48 Bets, 18.8% Win-Rate):
 - **Bugfix**: Liga-Filter griff nie (`sport_key` vs. `sport` Key-Mismatch)
 - **Tennis-Guard**: TENNIS_ENABLED Toggle in config.py (aktuell aktiv)
 - **Review geplant**: 2026-03-30 mit mehr Daten
+
+## Hub Dashboard Redesign (2026-03-16)
+
+- **Design**: Cyberpunk/Neon durch Dark+Gold Glassmorphism ersetzt (einheitlich mit Home Dashboard)
+- **KI-News → KI-Tipps**: Heise-Newslinks durch kuratierte Tipps & Tricks ersetzt (Tool, Steuer, Workflow)
+- **Code Review**: Woechentlicher automatischer Code-Review aller Repos (Freitag 17:00 Berlin), Ergebnisse im Hub
+- **Timezone**: Uhrzeit/Datum im Hub jetzt in Europe/Berlin statt UTC
+- **API**: `hub-summary` liefert `tips` statt `newsItems`, zusaetzlich `codeReview`
 
 ## Status
 
