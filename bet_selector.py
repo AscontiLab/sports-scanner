@@ -281,6 +281,17 @@ def _is_today(kick_off: str) -> bool:
     return kick_off[:10] == today_str
 
 
+def _is_near_future(kick_off: str, max_days: int = 2) -> bool:
+    """Prüft ob ein Anstoß innerhalb der nächsten N Tage liegt (UTC)."""
+    from datetime import datetime, timezone, timedelta
+    try:
+        now = datetime.now(timezone.utc)
+        ko = datetime.fromisoformat(kick_off.replace("Z", "+00:00"))
+        return ko <= now + timedelta(days=max_days)
+    except (ValueError, TypeError):
+        return False
+
+
 def select_bets(all_bets: list, bankroll: float | None = None) -> tuple[list, list]:
     """
     Hauptfunktion: Bewertet, filtert und selektiert die Top-Bets.
@@ -369,11 +380,13 @@ def select_bets(all_bets: list, bankroll: float | None = None) -> tuple[list, li
     # 2. Korrelations-Filter
     filtered = filter_correlated_bets(all_bets)
 
-    # 3. Splitten: heute vs. später
+    # 3. Splitten: heute vs. morgen (max 48h) — keine weit entfernten Spiele
     today_candidates = [b for b in filtered
                         if b["tier"] != "Watch" and _is_today(b.get("kick_off", ""))]
     later_candidates = [b for b in filtered
-                        if b["tier"] != "Watch" and not _is_today(b.get("kick_off", ""))]
+                        if b["tier"] != "Watch"
+                        and not _is_today(b.get("kick_off", ""))
+                        and _is_near_future(b.get("kick_off", ""), max_days=2)]
 
     today_candidates.sort(key=lambda b: b.get("confidence_score", 0), reverse=True)
     later_candidates.sort(key=lambda b: b.get("confidence_score", 0), reverse=True)

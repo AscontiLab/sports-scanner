@@ -27,19 +27,22 @@ _OUTPUT_DIR = Path(__file__).parent / "output"
 
 
 def _get_todays_bets() -> list[dict]:
-    """Liest heutige Selected Bets aus der DB."""
+    """Liest heutige Selected Bets aus der DB (dedupliziert)."""
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     conn = sqlite3.connect(_DB_PATH)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         """
-        SELECT sport_key, home_team, away_team, tip, best_odds,
-               edge_pct, stake_eur, tier, confidence_score, bet_won,
-               pnl_eur, commence_time, bet_type
+        SELECT sport_key, home_team, away_team, tip,
+               MAX(best_odds) AS best_odds,
+               edge_pct, MAX(stake_eur) AS stake_eur, tier,
+               confidence_score, bet_won, pnl_eur,
+               commence_time, bet_type
         FROM predictions
         WHERE selected = 1
           AND SUBSTR(commence_time, 1, 10) = ?
-        ORDER BY confidence_score DESC
+        GROUP BY home_team, away_team, tip
+        ORDER BY commence_time ASC
         """,
         (today,),
     ).fetchall()
@@ -78,13 +81,14 @@ def _get_recent_bets(days: int = 7) -> list[dict]:
     rows = conn.execute(
         """
         SELECT sport_key, home_team, away_team, tip,
-               ROUND(best_odds, 2) AS best_odds,
-               edge_pct, stake_eur, tier, confidence_score, bet_won,
-               pnl_eur, commence_time, bet_type
+               ROUND(MAX(best_odds), 2) AS best_odds,
+               edge_pct, MAX(stake_eur) AS stake_eur, tier,
+               confidence_score, bet_won, pnl_eur,
+               commence_time, bet_type
         FROM predictions
         WHERE selected = 1
           AND bet_won IS NOT NULL
-        GROUP BY home_team, away_team, tip, ROUND(best_odds, 1)
+        GROUP BY home_team, away_team, tip
         ORDER BY commence_time DESC
         LIMIT 50
         """,
