@@ -1807,7 +1807,7 @@ def _group_by_league(bets: list, label_map: dict, key: str = "sport") -> dict:
         league = label_map.get(raw_league, raw_league) if label_map else raw_league
         groups.setdefault(league, []).append(b)
     for league in groups:
-        groups[league].sort(key=lambda x: (x["kick_off"], -x["edge_pct"]))
+        groups[league].sort(key=lambda x: (x["kick_off"], -x.get("edge_pct", x.get("p_btts_yes", 0))))
     # Sortiere Ligen nach frühestem Anstoß
     return dict(sorted(groups.items(), key=lambda kv: kv[1][0]["kick_off"]))
 
@@ -1874,7 +1874,7 @@ def build_btts_table(signals: list) -> str:
     for league, league_sigs in _group_by_league(signals, SPORT_LABELS).items():
         html += f'<h3 class="league-header"><span class="tag2">{league}</span> ({len(league_sigs)})</h3>'
         rows = ""
-        for s in sorted(league_sigs, key=lambda x: x["p_btts_yes"], reverse=True):
+        for s in sorted(league_sigs, key=lambda x: (x["kick_off"], -x["p_btts_yes"])):
             yes_pct = s["p_btts_yes"]
             # Farbcodierung: >= 65% gruen, >= 55% gelb, sonst grau
             if yes_pct >= 65:

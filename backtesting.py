@@ -414,7 +414,33 @@ def log_prediction(
     confidence_score = bet_dict.get("confidence_score")
     selected = bet_dict.get("selected", 0)
 
+    match_id = match_raw.get("id") if match_raw else None
+    commence = bet_dict.get("kick_off", "")
+    tip_val = bet_dict.get("tip", "")
+    ou_line_val = bet_dict.get("ou_line") or bet_dict.get("line")
+
     with _connect() as conn:
+        # Duplikate-Check: gleiche Match-ID + Tip + OU-Linie = bereits geloggt
+        if match_id:
+            existing = conn.execute(
+                """SELECT id FROM predictions
+                   WHERE odds_api_match_id = ? AND tip = ?
+                   AND COALESCE(ou_line, 0) = COALESCE(?, 0)
+                   AND result_fetched_at IS NULL""",
+                (match_id, tip_val, ou_line_val),
+            ).fetchone()
+            if existing:
+                # Update selected/stake wenn sich Wettplan geändert hat
+                if selected:
+                    conn.execute(
+                        """UPDATE predictions SET selected = ?, stake_eur = ?,
+                           tier = ?, confidence_score = ?, best_odds = ?
+                           WHERE id = ?""",
+                        (selected, stake_eur, tier, confidence_score,
+                         bet_dict.get("best_odds", 0.0), existing[0]),
+                    )
+                return existing[0]
+
         cur = conn.execute(
             """
             INSERT INTO predictions (
@@ -437,15 +463,15 @@ def log_prediction(
             """,
             (
                 run_id,
-                match_raw.get("id") if match_raw else None,
+                match_id,
                 bet_dict.get("sport", ""),
                 bet_type,
                 home_team,
                 away_team,
-                bet_dict.get("kick_off", ""),
-                bet_dict.get("tip", ""),
+                commence,
+                tip_val,
                 outcome_side,
-                bet_dict.get("ou_line") or bet_dict.get("line"),
+                ou_line_val,
                 bet_dict.get("model_prob", 0.0),
                 model_source,
                 bet_dict.get("lam_home"),
@@ -844,8 +870,20 @@ def resolve_results(api_key: str | None = None) -> dict:
             err_msg = str(e)
             if api_key and api_key in err_msg:
                 err_msg = err_msg.replace(api_key, "***")
-            print(f"[Backtesting] Scores-API Fehler ({sport_key}): {err_msg} – übersprungen")
-            still_open += sum(len(v) for v in match_map.values()) + len(no_id_preds)
+            # 422 = Turnier nicht mehr in API → Bets als stale markieren
+            is_expired = "422" in err_msg
+            if is_expired:
+                expired_count = sum(len(v) for v in match_map.values()) + len(no_id_preds)
+                print(
+                    f"[Backtesting] ⚠ Sport '{sport_key}' nicht mehr in API (422) "
+                    f"– {expired_count} Bets benötigen manuelle Auflösung:"
+                )
+                print(f"  → python3 backtesting.py manual <id> <heim_score> <gast_score>")
+                print(f"  → python3 backtesting.py void <id>")
+                still_open += expired_count
+            else:
+                print(f"[Backtesting] Scores-API Fehler ({sport_key}): {err_msg} – übersprungen")
+                still_open += sum(len(v) for v in match_map.values()) + len(no_id_preds)
             continue
 
         scores_by_id: dict[str, dict] = {s["id"]: s for s in scores_data}
