@@ -25,6 +25,7 @@ from config import (
     MAX_EDGE_HARD_CAP,
     MAX_ODDS_SELECTED,
     OU_BONUS_POINTS,
+    PENALTY_1X2_POINTS,
     LEAGUE_MIN_EDGE,
 )
 from bankroll_manager import calculate_stake, get_current_bankroll
@@ -111,7 +112,11 @@ def compute_confidence_score(bet: dict, model_stats: dict | None = None) -> floa
     # 1. Edge-Qualität: Linear 3% → 0, 15% → 100
     edge = bet.get("edge_pct", 0.0)
     odds = bet.get("best_odds", bet.get("odds", 0.0))
-    edge_score = min(max((edge - 3.0) / 12.0, 0.0), 1.0) * 100
+    # Edge-Kurve: Peak bei 5-7%, danach fallend (hohe Edges = Overconfidence)
+    if edge <= 7.0:
+        edge_score = min(max((edge - 3.0) / 4.0, 0.0), 1.0) * 100
+    else:
+        edge_score = max(25, 100 - (edge - 7.0) * 10)
 
     # Edge-Skeptizismus: Hohe Edges auf hohe Odds werden gedaempft
     if edge > EDGE_SKEPTICISM_THRESHOLD and odds > ODDS_SKEPTICISM_THRESHOLD:
@@ -198,6 +203,13 @@ def compute_confidence_score(bet: dict, model_stats: dict | None = None) -> floa
     bet_type = bet.get("type", "").lower()
     if bet_type in ("football_ou", "ou"):
         score += OU_BONUS_POINTS
+
+    # 8. 1X2-Penalty: Home/Away-Bets haben schwache Win-Rate, Draws ausgenommen
+    if bet_type in ("football", "1x2"):
+        tip = bet.get("tip", "").lower()
+        is_draw = "unentschieden" in tip or tip == "x" or tip == "draw"
+        if not is_draw:
+            score -= PENALTY_1X2_POINTS
 
     return round(min(max(score, 0), 100), 1)
 
@@ -322,7 +334,7 @@ def select_bets(all_bets: list, bankroll: float | None = None) -> tuple[list, li
     for bet in all_bets:
         edge = bet.get("edge_pct", 0.0)
         odds = bet.get("best_odds", bet.get("odds", 0.0))
-        sport_key = bet.get("sport_key", "")
+        sport_key = bet.get("sport_key", "") or bet.get("sport", "")
         reason = None
 
         # Hard Edge Cap: Edge > 20% → nicht prädiktiv

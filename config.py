@@ -151,7 +151,7 @@ KELLY_FRACTION = 0.25           # Quarter-Kelly
 MAX_DAILY_BETS = 8              # Max 8 Bets pro Tag
 MAX_DAILY_RISK_PCT = 0.15       # Max 15% der Bankroll pro Tag
 MIN_STAKE_EUR = 1.0             # Minimum-Einsatz
-MAX_SAME_OUTCOME = 2            # Max gleiche Outcome-Art (z.B. max 2x Unentschieden)
+MAX_SAME_OUTCOME = 3            # Max gleiche Outcome-Art (wenn O/U dominiert)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # BET-SELEKTOR: CONFIDENCE SCORING
@@ -159,17 +159,17 @@ MAX_SAME_OUTCOME = 2            # Max gleiche Outcome-Art (z.B. max 2x Unentschi
 
 # Gewichte für Confidence Score (Summe = 1.0)
 CONFIDENCE_WEIGHTS = {
-    "edge_quality":       0.15,
-    "model_reliability":  0.30,
+    "edge_quality":       0.10,
+    "model_reliability":  0.25,
     "odds_quality":       0.10,
-    "market_consensus":   0.20,
-    "data_depth":         0.10,
-    "odds_preference":    0.15,
+    "market_consensus":   0.25,
+    "data_depth":         0.05,
+    "odds_preference":    0.25,
 }
 
 # Odds-Praeferenz: Bevorzugt moderate Quoten, daempft extreme Aussenseiter
-ODDS_PREF_SWEET_SPOT = (1.50, 3.00)   # Optimaler Odds-Bereich → Score 100
-ODDS_PREF_MAX = 8.0                    # Ab hier Score 0
+ODDS_PREF_SWEET_SPOT = (1.60, 2.80)   # Optimaler Odds-Bereich → Score 100
+ODDS_PREF_MAX = 4.0                    # Ab hier Score 0
 
 # Tier-Schwellen
 TIER_STRONG_PICK = 70   # Score >= 70 → Strong Pick
@@ -180,9 +180,9 @@ TIER_VALUE_BET   = 45   # Score >= 45 → Value Bet
 # SAFETY FILTERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-MAX_MODEL_MARKET_GAP = 0.15           # Max model_prob - consensus_prob bevor auto-Watch
-EDGE_SKEPTICISM_THRESHOLD = 20.0      # Edge% ab dem Skeptizismus greift
-ODDS_SKEPTICISM_THRESHOLD = 3.5       # Nur bei Odds ueber diesem Wert
+MAX_MODEL_MARKET_GAP = 0.10           # Max model_prob - consensus_prob bevor auto-Watch
+EDGE_SKEPTICISM_THRESHOLD = 8.0       # Edge% ab dem Skeptizismus greift
+ODDS_SKEPTICISM_THRESHOLD = 2.80      # Nur bei Odds ueber diesem Wert
 MODEL_TRUST_MIN_BETS = 20             # Min. Bets bevor Win-Rate-Adjustment greift
 MODEL_TRUST_EXPECTED_WIN_RATE = 0.40  # Win-Rate bei der Trust = 1.0
 MODEL_TRUST_FLOOR = 0.05             # Minimaler Trust-Multiplikator
@@ -191,14 +191,14 @@ MODEL_TRUST_FLOOR = 0.05             # Minimaler Trust-Multiplikator
 # HARD FILTERS (basierend auf Performance-Analyse)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-MAX_EDGE_HARD_CAP = 20.0              # Edge > 20% → auto-Watch (nicht prädiktiv)
-MAX_ODDS_SELECTED = 4.50              # Odds > 4.50 → auto-Watch (Longshots verlieren)
-OU_BONUS_POINTS = 5.0                 # O/U-Wetten: +5 Punkte Confidence Bonus
+MAX_EDGE_HARD_CAP = 99.0              # Deaktiviert — wird am 2026-03-30 mit Daten neu bewertet
+MAX_ODDS_SELECTED = 99.0              # Deaktiviert — wird am 2026-03-30 mit Daten neu bewertet
+OU_BONUS_POINTS = 12.0                # O/U-Wetten: +12 Punkte Confidence Bonus (41.7% Win-Rate)
+PENALTY_1X2_POINTS = 4.0              # 1X2-Wetten: -4 Punkte (Draws ausgenommen, siehe bet_selector)
 
-# Liga-spezifische Mindest-Edge (Ligen mit historisch 0% Win-Rate)
-LEAGUE_MIN_EDGE = {
-    "soccer_germany_bundesliga2": 15.0,
-    "soccer_germany_liga3": 15.0,
-    "soccer_france_ligue_one": 15.0,
-    "soccer_spain_la_liga": 15.0,        # 0% Win-Rate bei 4 Bets
-}
+# Liga-spezifische Mindest-Edge (aktuell leer — zu wenig Daten für Ausschlüsse)
+# Wird am 2026-03-30 mit mehr Backtesting-Daten neu bewertet
+LEAGUE_MIN_EDGE = {}
+
+# Tennis: Am 2026-03-30 mit mehr Daten neu bewerten
+TENNIS_ENABLED = True

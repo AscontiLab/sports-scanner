@@ -40,6 +40,7 @@ from config import (
     EUROPEAN_FDCO_LEAGUES,
     ODDS_API_BASE, MIN_ODDS_API_REMAINING,
     KICKTIPP_FOOTBALL_SPORTS, KICKTIPP_UEFA_SPORTS, KICKTIPP_LABELS,
+    TENNIS_ENABLED,
 )
 from bankroll_manager import (
     init_bankroll, get_current_bankroll, get_daily_budget,
@@ -2292,68 +2293,72 @@ def main() -> int:
                 all_btts_signals.extend(btts_sigs)
 
         # ── TENNIS ──────────────────────────────────────────────────────────
-        print("\n[🎾 Tennis] ATP + WTA Elo-Ratings parallel berechnen …")
-        elo_years = get_elo_years()
-        from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            atp_future = pool.submit(compute_tennis_elo, elo_years)
-            wta_future = pool.submit(compute_wta_elo, elo_years)
-            atp_elo_dict, atp_surface_elo, atp_training_matches = atp_future.result()
-            wta_elo_dict, wta_surface_elo, wta_training_matches = wta_future.result()
-        print(f"  ATP: {len(atp_elo_dict)} Spieler im Elo-Dict")
-        for surf, sdict in atp_surface_elo.items():
-            print(f"    {surf}: {len(sdict)} Spieler")
-        print(f"  WTA: {len(wta_elo_dict)} Spielerinnen im Elo-Dict")
-        for surf, sdict in wta_surface_elo.items():
-            print(f"    {surf}: {len(sdict)} Spielerinnen")
+        if not TENNIS_ENABLED:
+            all_tennis_bets = []
+            print("\n[🎾 Tennis] Deaktiviert (TENNIS_ENABLED=False)")
+        else:
+            print("\n[🎾 Tennis] ATP + WTA Elo-Ratings parallel berechnen …")
+            elo_years = get_elo_years()
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                atp_future = pool.submit(compute_tennis_elo, elo_years)
+                wta_future = pool.submit(compute_wta_elo, elo_years)
+                atp_elo_dict, atp_surface_elo, atp_training_matches = atp_future.result()
+                wta_elo_dict, wta_surface_elo, wta_training_matches = wta_future.result()
+            print(f"  ATP: {len(atp_elo_dict)} Spieler im Elo-Dict")
+            for surf, sdict in atp_surface_elo.items():
+                print(f"    {surf}: {len(sdict)} Spieler")
+            print(f"  WTA: {len(wta_elo_dict)} Spielerinnen im Elo-Dict")
+            for surf, sdict in wta_surface_elo.items():
+                print(f"    {surf}: {len(sdict)} Spielerinnen")
 
-        # Kombiniertes Dict für Lookup (ATP + WTA)
-        combined_elo = {**atp_elo_dict, **wta_elo_dict}
-        combined_tennis_training = atp_training_matches + wta_training_matches
-        combined_surface_elo = {}
-        for surf in ["Hard", "Clay", "Grass"]:
-            combined_surface_elo[surf] = {**atp_surface_elo.get(surf, {}),
-                                          **wta_surface_elo.get(surf, {})}
+            # Kombiniertes Dict für Lookup (ATP + WTA)
+            combined_elo = {**atp_elo_dict, **wta_elo_dict}
+            combined_tennis_training = atp_training_matches + wta_training_matches
+            combined_surface_elo = {}
+            for surf in ["Hard", "Clay", "Grass"]:
+                combined_surface_elo[surf] = {**atp_surface_elo.get(surf, {}),
+                                              **wta_surface_elo.get(surf, {})}
 
-        print("\n[🎾 Tennis] Aktive Turniere suchen …")
-        try:
-            all_sports   = get_active_sports(api_key)
-            tennis_sports = [s for s in all_sports
-                             if s["key"].startswith("tennis_") and s["active"]]
-            print(f"  {len(tennis_sports)} aktive Tennis-Turniere:")
-            for s in tennis_sports:
-                print(f"    - {s['key']} ({s['title']})")
-        except Exception as e:
-            print(f"  Fehler: {e}")
-            tennis_sports = []
-
-        for sport in tennis_sports:
-            sport_key = sport["key"]
-            title     = sport["title"]
-            print(f"  {title}:")
+            print("\n[🎾 Tennis] Aktive Turniere suchen …")
             try:
-                matches = get_odds(api_key, sport_key, markets="h2h")
+                all_sports   = get_active_sports(api_key)
+                tennis_sports = [s for s in all_sports
+                                 if s["key"].startswith("tennis_") and s["active"]]
+                print(f"  {len(tennis_sports)} aktive Tennis-Turniere:")
+                for s in tennis_sports:
+                    print(f"    - {s['key']} ({s['title']})")
             except Exception as e:
-                print(f"    Fehler: {e}")
-                continue
-            if ODDS_API_REMAINING is not None and ODDS_API_REMAINING <= MIN_ODDS_API_REMAINING:
-                print(f"    Hinweis: API-Quota sehr niedrig ({ODDS_API_REMAINING}) – stoppe weitere Odds-Calls.")
-                break
-            for match in matches:
-                bets = analyze_tennis_match(
-                    match,
-                    title,
-                    combined_elo,
-                    combined_surface_elo,
-                    training_matches=combined_tennis_training,
-                )
-                if bets:
-                    enrich_bets_with_market_data(bets, match)
-                    all_tennis_bets.extend(bets)
-                    for b in bets:
-                        b["_pred_id"] = log_prediction(_run_id, b, match_raw=match)
-                        print(f"    ✓ VALUE: {b['match']} → {b['tip']} "
-                              f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
+                print(f"  Fehler: {e}")
+                tennis_sports = []
+
+            for sport in tennis_sports:
+                sport_key = sport["key"]
+                title     = sport["title"]
+                print(f"  {title}:")
+                try:
+                    matches = get_odds(api_key, sport_key, markets="h2h")
+                except Exception as e:
+                    print(f"    Fehler: {e}")
+                    continue
+                if ODDS_API_REMAINING is not None and ODDS_API_REMAINING <= MIN_ODDS_API_REMAINING:
+                    print(f"    Hinweis: API-Quota sehr niedrig ({ODDS_API_REMAINING}) – stoppe weitere Odds-Calls.")
+                    break
+                for match in matches:
+                    bets = analyze_tennis_match(
+                        match,
+                        title,
+                        combined_elo,
+                        combined_surface_elo,
+                        training_matches=combined_tennis_training,
+                    )
+                    if bets:
+                        enrich_bets_with_market_data(bets, match)
+                        all_tennis_bets.extend(bets)
+                        for b in bets:
+                            b["_pred_id"] = log_prediction(_run_id, b, match_raw=match)
+                            print(f"    ✓ VALUE: {b['match']} → {b['tip']} "
+                                  f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
 
         # ── UEFA ────────────────────────────────────────────────────────────
         print("\n[🏆 UEFA] Club-Elo-Ratings laden …")

@@ -34,7 +34,9 @@ Scanner fuer Value Bets in Fussball und Tennis. Das System kombiniert statistisc
 - `sports_scanner.py`
   - Hauptscanner fuer Modelle, Quotenvergleich und Reports
 - `bet_selector.py`
-  - Confidence Scoring (Edge, Model Reliability, Odds, Consensus, Data Depth)
+  - Confidence Scoring (Edge, Model Reliability, Odds, Consensus, Data Depth, Odds-Praeferenz)
+  - Edge-Kurve: Peak bei 5-7%, danach fallend (hohe Edges = Overconfidence)
+  - O/U-Bonus (+12 Punkte), 1X2-Penalty (-4 Punkte, Draws ausgenommen)
   - Tiers: Strong Pick (>=70), Value Bet (>=45), Watch (<45)
   - Max 8 Bets/Tag, 15% Tagesrisiko
 - `bankroll_manager.py`
@@ -42,7 +44,9 @@ Scanner fuer Value Bets in Fussball und Tennis. Das System kombiniert statistisc
 - `backtesting.py`
   - Speicherung, Auto-Resolve (Scores-API) und ROI-Auswertung
 - `config.py`
-  - Zentralisierte Konfiguration (Bankroll, Kelly, Limits)
+  - Zentralisierte Konfiguration (Bankroll, Kelly, Limits, Confidence Weights)
+  - TENNIS_ENABLED Toggle, LEAGUE_MIN_EDGE Map, Hard-Filter-Caps
+  - Odds Sweet Spot (1.60-2.80), Skeptizismus-Schwellen
 - `alerts.py`
   - Telegram-Benachrichtigungen (High-Edge >= 10%)
 - `serve_output.py`
@@ -139,6 +143,20 @@ Weitere Artefakte:
 - Nach erfolgreichem Scan werden E-Mail-Reports (Sports + Kicktipp) ausgeloest
 - `serve_output.py` stellt generierte Dateien und APIs fuer Hub Dashboard und n8n bereit
 - Telegram-Alerts sind implementiert, erfordern Credentials in `~/.stock_scanner_credentials`
+
+## Model-Tuning (2026-03-16)
+
+Datengetriebenes Tuning basierend auf Backtesting (48 Bets, 18.8% Win-Rate):
+
+- **Confidence Weights** neu gewichtet: Odds-Praeferenz und Markt-Konsens staerker, Edge und Datentiefe schwaecher
+- **Edge-Kurve**: Peak bei 5-7%, danach fallend (hohe Edges korrelieren invers mit Erfolg)
+- **O/U-Bonus**: +12 Punkte (41.7% Win-Rate vs. 12.1% bei 1X2 Home/Away)
+- **1X2-Penalty**: -4 Punkte fuer Home/Away-Bets, Draws ausgenommen
+- **Odds Sweet Spot**: 1.60-2.80 (engerer Bereich), Skeptizismus ab Edge 8% / Odds 2.80
+- **Market-Gap**: Max 10pp Abweichung Modell vs. Konsens (vorher 15pp)
+- **Bugfix**: Liga-Filter griff nie (`sport_key` vs. `sport` Key-Mismatch)
+- **Tennis-Guard**: TENNIS_ENABLED Toggle in config.py (aktuell aktiv)
+- **Review geplant**: 2026-03-30 mit mehr Daten
 
 ## Status
 
