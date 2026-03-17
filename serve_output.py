@@ -8,6 +8,7 @@ Dient nur zum Lesen der Output-Dateien (sports_signals.html, kicktipp_data.json 
 import json
 import os
 import sys
+from datetime import date
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -124,10 +125,13 @@ class OutputHandler(SimpleHTTPRequestHandler):
                 if p.is_file():
                     cfd_count = _count_csv_rows(p)
                     break
-            # KI-Tipps
+            # KI-Tipps — tagesbasierte Rotation
             tips = _read_json(BASE_DIRS["/hub/"] / "ki_tips.json")
             if not isinstance(tips, list):
                 tips = []
+            if len(tips) > 5:
+                offset = date.today().toordinal() % len(tips)
+                tips = (tips[offset:] + tips[:offset])
             # Code Review
             review = _read_json(BASE_DIRS["/hub/"] / "code_review.json")
             if not isinstance(review, dict):
