@@ -41,6 +41,7 @@ from config import (
     ODDS_API_BASE, MIN_ODDS_API_REMAINING,
     KICKTIPP_FOOTBALL_SPORTS, KICKTIPP_UEFA_SPORTS, KICKTIPP_LABELS,
     TENNIS_ENABLED,
+    load_credentials,
 )
 from bankroll_manager import (
     init_bankroll, get_current_bankroll, get_daily_budget,
@@ -50,7 +51,8 @@ from bet_selector import select_bets
 
 import subprocess
 
-warnings.filterwarnings("ignore")
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 # Mutable global — nicht in config.py
 ODDS_API_REMAINING: int | None = None
@@ -375,26 +377,8 @@ def _request_with_retry(url: str, params: dict | None = None,
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# CREDENTIALS
+# CREDENTIALS — importiert aus config.py (load_credentials)
 # ═══════════════════════════════════════════════════════════════════════════════
-
-def load_creds() -> dict:
-    if not CREDS_FILE.exists():
-        print(f"ERROR: Credentials-Datei fehlt: {CREDS_FILE}")
-        return {}
-    creds = {}
-    try:
-        with open(CREDS_FILE) as f:
-            for line in f:
-                line = line.strip()
-                if "=" in line and not line.startswith("#"):
-                    k, v = line.split("=", 1)
-                    creds[k.strip()] = v.strip()
-    except FileNotFoundError:
-        print(f"ERROR: Credentials-Datei nicht gefunden: {CREDS_FILE}", file=sys.stderr)
-    except Exception as e:
-        print(f"ERROR: Credentials laden fehlgeschlagen: {e}", file=sys.stderr)
-    return creds
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -965,9 +949,9 @@ def _detect_surface(tournament_name: str) -> str | None:
     return None
 
 
-def compute_tennis_elo(years: list) -> tuple[dict, dict, int]:
+def _compute_elo(download_fn, years: list, label: str) -> tuple[dict, dict, int]:
     """
-    Berechnet Elo-Ratings aus historischen ATP-Matches.
+    Berechnet Elo-Ratings aus historischen Tennis-Matches.
     Gibt (gesamt_elo, surface_elo, training_matches) zurück.
     surface_elo = {"Hard": {name: elo}, "Clay": {...}, "Grass": {...}}
     """
@@ -976,12 +960,12 @@ def compute_tennis_elo(years: list) -> tuple[dict, dict, int]:
     surface_elo = {"Hard": {}, "Clay": {}, "Grass": {}}
     all_frames = []
     with ThreadPoolExecutor(max_workers=len(years)) as pool:
-        results = list(pool.map(download_atp_year, years))
+        results = list(pool.map(download_fn, years))
     for df in results:
         if df is not None and "winner_name" in df.columns:
             all_frames.append(df)
     if not all_frames:
-        print("    Warning: Keine ATP-Daten geladen")
+        print(f"    Warning: Keine {label}-Daten geladen")
         return {}, surface_elo, 0
 
     combined = pd.concat(all_frames, ignore_index=True)
@@ -1019,6 +1003,11 @@ def compute_tennis_elo(years: list) -> tuple[dict, dict, int]:
     return elo, surface_elo, int(len(combined))
 
 
+def compute_tennis_elo(years: list) -> tuple[dict, dict, int]:
+    """Berechnet Elo-Ratings aus historischen ATP-Matches."""
+    return _compute_elo(download_atp_year, years, "ATP")
+
+
 def download_wta_year(year: int) -> pd.DataFrame | None:
     url = f"{WTA_BASE}/wta_matches_{year}.csv"
     try:
@@ -1031,52 +1020,8 @@ def download_wta_year(year: int) -> pd.DataFrame | None:
 
 
 def compute_wta_elo(years: list) -> tuple[dict, dict, int]:
-    """Berechnet Elo-Ratings aus historischen WTA-Matches.
-    Gibt (gesamt_elo, surface_elo, training_matches) zurück."""
-    from concurrent.futures import ThreadPoolExecutor
-    elo = {}
-    surface_elo = {"Hard": {}, "Clay": {}, "Grass": {}}
-    all_frames = []
-    with ThreadPoolExecutor(max_workers=len(years)) as pool:
-        results = list(pool.map(download_wta_year, years))
-    for df in results:
-        if df is not None and "winner_name" in df.columns:
-            all_frames.append(df)
-    if not all_frames:
-        print("    Warning: Keine WTA-Daten geladen")
-        return {}, surface_elo, 0
-
-    combined = pd.concat(all_frames, ignore_index=True)
-    combined = combined.dropna(subset=["winner_name", "loser_name"])
-    if "tourney_date" in combined.columns:
-        combined["tourney_date"] = pd.to_numeric(combined["tourney_date"], errors="coerce")
-        combined = combined.sort_values("tourney_date")
-
-    def expected(ra, rb):
-        return 1 / (1 + 10 ** ((rb - ra) / 400))
-
-    for _, row in combined.iterrows():
-        w = str(row["winner_name"]).strip()
-        l = str(row["loser_name"]).strip()
-        if not w or not l:
-            continue
-        elo.setdefault(w, ELO_INITIAL)
-        elo.setdefault(l, ELO_INITIAL)
-        e_w = expected(elo[w], elo[l])
-        e_l = 1 - e_w
-        elo[w] += ELO_K_FACTOR * (1 - e_w)
-        elo[l] += ELO_K_FACTOR * (0 - e_l)
-        surface = str(row.get("surface", "")).strip().capitalize() if pd.notna(row.get("surface")) else None
-        if surface in surface_elo:
-            s_elo = surface_elo[surface]
-            s_elo.setdefault(w, ELO_INITIAL)
-            s_elo.setdefault(l, ELO_INITIAL)
-            se_w = expected(s_elo[w], s_elo[l])
-            se_l = 1 - se_w
-            s_elo[w] += ELO_K_FACTOR * (1 - se_w)
-            s_elo[l] += ELO_K_FACTOR * (0 - se_l)
-
-    return elo, surface_elo, int(len(combined))
+    """Berechnet Elo-Ratings aus historischen WTA-Matches."""
+    return _compute_elo(download_wta_year, years, "WTA")
 
 
 def predict_tennis_win_prob(elo_a: float, elo_b: float) -> float:
@@ -1813,9 +1758,10 @@ def _group_by_league(bets: list, label_map: dict, key: str = "sport") -> dict:
     return dict(sorted(groups.items(), key=lambda kv: kv[1][0]["kick_off"]))
 
 
-def build_football_table(bets: list) -> str:
+def _build_bet_table(bets: list, empty_msg: str) -> str:
+    """Gemeinsame Logik fuer Football- und O/U-Tabellen."""
     if not bets:
-        return '<div class="empty">Keine Football-Value-Bets gefunden – Modell benötigt ausreichend historische Matches für alle Teams.</div>'
+        return f'<div class="empty">{empty_msg}</div>'
     headers = ["Spiel", "Tipp", "Anstoß", "Modell-%", "Beste Quote", "Edge-%", "Kelly-%", "λ Heim", "λ Gast"]
     ths = "".join(f"<th>{h}</th>" for h in headers)
     html = ""
@@ -1837,32 +1783,14 @@ def build_football_table(bets: list) -> str:
         </tr>"""
         html += f"<table><tr>{ths}</tr>{rows}</table>"
     return html
+
+
+def build_football_table(bets: list) -> str:
+    return _build_bet_table(bets, "Keine Value Bets gefunden.")
 
 
 def build_ou_table(bets: list) -> str:
-    if not bets:
-        return '<div class="empty">Keine Über/Unter Value Bets gefunden.</div>'
-    headers = ["Spiel", "Tipp", "Anstoß", "Modell-%", "Beste Quote", "Edge-%", "Kelly-%", "λ Heim", "λ Gast"]
-    ths = "".join(f"<th>{h}</th>" for h in headers)
-    html = ""
-    for league, league_bets in _group_by_league(bets, SPORT_LABELS).items():
-        html += f'<h3 class="league-header"><span class="tag">{league}</span> ({len(league_bets)})</h3>'
-        rows = ""
-        for b in league_bets:
-            ec = edge_class(b["edge_pct"])
-            rows += f"""<tr>
-          <td><strong>{b['match']}</strong></td>
-          <td>{b['tip']}</td>
-          <td>{format_dt(b['kick_off'])}</td>
-          <td>{b['model_prob']*100:.1f}%</td>
-          <td>{b['best_odds']:.2f}</td>
-          <td class="{ec}">{b['edge_pct']:.1f}%</td>
-          <td style="color:#58a6ff">{b['kelly_pct']:.1f}%</td>
-          <td style="color:#8b949e">{b['lam_home']:.2f}</td>
-          <td style="color:#8b949e">{b['lam_away']:.2f}</td>
-        </tr>"""
-        html += f"<table><tr>{ths}</tr>{rows}</table>"
-    return html
+    return _build_bet_table(bets, "Keine Over/Under Value Bets gefunden.")
 
 
 def build_btts_table(signals: list) -> str:
@@ -2193,7 +2121,7 @@ def main() -> int:
     print(f"  Sports Value Scanner — {datetime.now().strftime('%d.%m.%Y %H:%M')}")
     print("=" * 60)
 
-    creds = load_creds()
+    creds = load_credentials()
     api_key = creds.get("ODDS_API_KEY", "")
     if not args.dry_run and not api_key:
         print("ERROR: ODDS_API_KEY fehlt in ~/.stock_scanner_credentials")

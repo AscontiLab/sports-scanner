@@ -5,6 +5,7 @@ Alle Konstanten, die in sports_scanner.py, bet_selector.py und bankroll_manager.
 verwendet werden.
 """
 
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -202,3 +203,34 @@ LEAGUE_MIN_EDGE = {}
 
 # Tennis: Am 2026-03-30 mit mehr Daten neu bewerten
 TENNIS_ENABLED = True
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# KOMBINIERTE LABELS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+ALL_LABELS = {**SPORT_LABELS, **UEFA_LABELS}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CREDENTIALS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def load_credentials(path: Path | None = None) -> dict:
+    """Liest KEY=VALUE Credentials aus einer Datei (Standard: ~/.stock_scanner_credentials)."""
+    cred_file = path or CREDS_FILE
+    if not cred_file.exists():
+        print(f"Fehler: Credentials-Datei fehlt: {cred_file}", file=sys.stderr)
+        return {}
+    creds = {}
+    try:
+        with open(cred_file) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    creds[k.strip()] = v.strip()
+    except Exception as e:
+        print(f"Fehler: Credentials laden fehlgeschlagen: {e}", file=sys.stderr)
+    return creds

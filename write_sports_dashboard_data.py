@@ -20,7 +20,7 @@ from bankroll_manager import (
     update_bankroll_from_results,
     generate_tuning_report,
 )
-from config import STARTING_BANKROLL, SPORT_LABELS, UEFA_LABELS
+from config import STARTING_BANKROLL, ALL_LABELS
 
 _DB_PATH = Path(__file__).parent / "sports_backtesting.db"
 _OUTPUT_DIR = Path(__file__).parent / "output"
@@ -48,7 +48,7 @@ def _get_todays_bets() -> list[dict]:
     ).fetchall()
     conn.close()
 
-    labels = {**SPORT_LABELS, **UEFA_LABELS}
+    labels = ALL_LABELS
     bets = []
     for r in rows:
         status = "offen"
@@ -95,7 +95,7 @@ def _get_recent_bets(days: int = 7) -> list[dict]:
     ).fetchall()
     conn.close()
 
-    labels = {**SPORT_LABELS, **UEFA_LABELS}
+    labels = ALL_LABELS
     bets = []
     for r in rows:
         status = "gewonnen" if r["bet_won"] == 1 else "verloren"
@@ -155,26 +155,18 @@ def main():
     todays_bets = _get_todays_bets()
     recent_bets = _get_recent_bets()
 
-    # Win-Rate berechnen
+    # Win-Rate und ROI berechnen
     total_resolved = bankroll_info["resolved_bets"]
     conn = sqlite3.connect(_DB_PATH)
+    conn.row_factory = sqlite3.Row
     won = conn.execute(
-        "SELECT COUNT(*) FROM predictions WHERE selected=1 AND bet_won=1"
-    ).fetchone()[0]
+        "SELECT COUNT(*) AS cnt FROM predictions WHERE selected=1 AND bet_won=1"
+    ).fetchone()["cnt"]
+    total_stake = conn.execute(
+        "SELECT COALESCE(SUM(stake_eur),0) AS total FROM predictions WHERE selected=1 AND bet_won IS NOT NULL"
+    ).fetchone()["total"]
     conn.close()
     win_rate = round(won / total_resolved * 100, 1) if total_resolved > 0 else 0.0
-    roi = round(
-        bankroll_info["total_pnl"] / max(1, total_resolved) * 100
-        / max(1, STARTING_BANKROLL) * total_resolved,
-        1,
-    ) if total_resolved > 0 else 0.0
-
-    # Einfacher ROI: total_pnl / total_stake
-    conn2 = sqlite3.connect(_DB_PATH)
-    total_stake = conn2.execute(
-        "SELECT COALESCE(SUM(stake_eur),0) FROM predictions WHERE selected=1 AND bet_won IS NOT NULL"
-    ).fetchone()[0]
-    conn2.close()
     roi = round(bankroll_info["total_pnl"] / total_stake * 100, 1) if total_stake > 0 else 0.0
 
     bankroll_data = {

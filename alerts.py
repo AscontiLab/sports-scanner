@@ -9,25 +9,13 @@ Credentials in ~/.stock_scanner_credentials:
 """
 
 import requests
-from pathlib import Path
 
-
-def _load_creds() -> dict:
-    cred_file = Path.home() / ".stock_scanner_credentials"
-    creds = {}
-    if cred_file.exists():
-        with open(cred_file) as f:
-            for line in f:
-                line = line.strip()
-                if "=" in line and not line.startswith("#"):
-                    k, v = line.split("=", 1)
-                    creds[k.strip()] = v.strip()
-    return creds
+from config import load_credentials
 
 
 def load_telegram_creds() -> tuple[str, str]:
     """Gibt (bot_token, chat_id) zurück."""
-    creds = _load_creds()
+    creds = load_credentials()
     return creds.get("TELEGRAM_BOT_TOKEN", ""), creds.get("TELEGRAM_CHAT_ID", "")
 
 

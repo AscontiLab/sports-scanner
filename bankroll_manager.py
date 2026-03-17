@@ -17,8 +17,7 @@ from config import (
     MAX_DAILY_BETS,
     MAX_DAILY_RISK_PCT,
     MIN_STAKE_EUR,
-    SPORT_LABELS,
-    UEFA_LABELS,
+    ALL_LABELS,
 )
 
 _DB_PATH = Path(__file__).parent / "sports_backtesting.db"
@@ -330,7 +329,7 @@ def generate_tuning_report() -> dict:
             GROUP BY sport_key ORDER BY pnl
             """
         ).fetchall()
-        _labels = {**SPORT_LABELS, **UEFA_LABELS}
+        _labels = ALL_LABELS
         for r in rows:
             t = int(r["total"])
             w = int(r["won"]) if r["won"] else 0

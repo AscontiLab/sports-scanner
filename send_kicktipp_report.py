@@ -11,17 +11,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
 
-
-def load_credentials() -> dict:
-    cred_file = Path.home() / ".stock_scanner_credentials"
-    creds = {}
-    with open(cred_file) as f:
-        for line in f:
-            line = line.strip()
-            if "=" in line and not line.startswith("#"):
-                k, v = line.split("=", 1)
-                creds[k.strip()] = v.strip()
-    return creds
+from config import load_credentials
 
 
 def build_subject(html_path: Path) -> str:

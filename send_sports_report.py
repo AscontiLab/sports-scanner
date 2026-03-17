@@ -13,20 +13,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
 
-
-def load_credentials() -> dict:
-    cred_file = Path.home() / ".stock_scanner_credentials"
-    creds = {}
-    if not cred_file.exists():
-        print(f"Fehler: Credentials-Datei fehlt: {cred_file}", file=sys.stderr)
-        return {}
-    with open(cred_file) as f:
-        for line in f:
-            line = line.strip()
-            if "=" in line and not line.startswith("#"):
-                k, v = line.split("=", 1)
-                creds[k.strip()] = v.strip()
-    return creds
+from config import load_credentials
 
 
 def require_keys(creds: dict, keys: list[str]) -> bool:
