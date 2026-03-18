@@ -153,6 +153,11 @@ def _sports_bets_payload(date_str: str | None = None):
 
 class OutputHandler(SimpleHTTPRequestHandler):
 
+    def _send_cors_headers(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
     def _check_api_auth(self) -> bool:
         """Prüft Bearer-Token für GET /api/* Endpoints.
         Gibt True zurück wenn Zugriff erlaubt, False wenn abgelehnt (Response bereits gesendet)."""
@@ -163,6 +168,7 @@ class OutputHandler(SimpleHTTPRequestHandler):
             return True
         self.send_response(401)
         self.send_header("Content-Type", "application/json")
+        self._send_cors_headers()
         self.end_headers()
         self.wfile.write(b'{"error": "Unauthorized"}')
         return False
@@ -170,9 +176,18 @@ class OutputHandler(SimpleHTTPRequestHandler):
     def _json_response(self, data, status=200):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self._send_cors_headers()
         self.end_headers()
         self.wfile.write(json.dumps(data, ensure_ascii=False).encode())
+
+    def do_OPTIONS(self):
+        if self.path.startswith("/api/"):
+            self.send_response(204)
+            self._send_cors_headers()
+            self.end_headers()
+            return
+        self.send_response(404)
+        self.end_headers()
 
     def _handle_api(self):
         """Convenience-API-Endpoints fuer n8n Workflows."""

@@ -137,6 +137,24 @@ Weitere Artefakte:
 - `GET /api/kicktipp-for-date?date=YYYY-MM-DD` — Tipps fuer Datum
 - `GET /api/kicktipp-stats` — Aggregierte Stats (30 Tage)
 
+## Webhook-Proxy fuer den Browser
+
+Der Sports-Report wird unter `https://agents.umzwei.de/webhook/sports-report` ausgeliefert. Fuer Browser-Aktionen wie `In Bankroll` darf das Frontend daher nicht direkt auf `http://...:8099` zugreifen.
+
+Stattdessen nutzt der Report gleich-origin Webhooks:
+
+- `GET /webhook/sports-bets?date=YYYY-MM-DD`
+- `POST /webhook/sports-bets-place`
+
+Diese sollen in n8n serverseitig an den lokalen Sports-Scanner-Server weiterleiten:
+
+- `http://172.28.0.1:8099/api/sports-bets`
+- `http://172.28.0.1:8099/api/sports-bets/place`
+
+Importierbare Workflow-Definitionen liegen unter:
+
+- `n8n/sports-bets-proxy-workflows.json`
+
 ## Betriebshinweise
 
 - Das Wrapper-Skript verhindert parallele Laeufe ueber eine Lock-Datei

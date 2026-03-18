@@ -2161,12 +2161,38 @@ def generate_html(football_bets: list, ou_bets: list,
   Sportwetten sind mit erheblichen Verlustrisiken verbunden.
 </div>
 <script>
+function getSportsApiBase(){{
+  const host=window.location.hostname || '127.0.0.1';
+  const protocol=window.location.protocol === 'https:' ? 'https:' : 'http:';
+  const port=window.location.port || '';
+
+  if (host === 'agents.umzwei.de') {{
+    return `${{window.location.origin}}/webhook`;
+  }}
+
+  if (window.location.origin && port === '8099') {{
+    return `${{protocol}}//${{host}}:8099`;
+  }}
+
+  return `${{protocol}}//${{host}}:8099`;
+}}
+
+function getSportsApiUrl(kind, query=''){{
+  const base=getSportsApiBase();
+  if (base.endsWith('/webhook')) {{
+    const route=kind === 'place' ? 'sports-bets-place' : 'sports-bets';
+    return `${{base}}/${{route}}${{query}}`;
+  }}
+  const route=kind === 'place' ? '/api/sports-bets/place' : '/api/sports-bets';
+  return `${{base}}${{route}}${{query}}`;
+}}
+
 async function refreshSportsBetState(){{
   const toolbar=document.querySelector('.wettplan-toolbar');
   if(!toolbar) return;
   const date=toolbar.dataset.reportDate;
   try {{
-    const resp=await fetch(`/api/sports-bets?date=${{encodeURIComponent(date)}}`);
+    const resp=await fetch(getSportsApiUrl('list', `?date=${{encodeURIComponent(date)}}`));
     if(!resp.ok) throw new Error('State-Load fehlgeschlagen');
     const data=await resp.json();
     const byId=new Map((data.recommended||[]).map(row=>[String(row.prediction_id),row]));
@@ -2208,7 +2234,7 @@ async function toggleSportsBetPlacement(button){{
 
   button.classList.add('loading');
   try {{
-    const resp=await fetch('/api/sports-bets/place', {{
+    const resp=await fetch(getSportsApiUrl('place'), {{
       method:'POST',
       headers:{{'Content-Type':'application/json'}},
       body:JSON.stringify(payload)

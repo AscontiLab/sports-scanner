@@ -1,0 +1,193 @@
+{
+  "name": "sports-bets-proxy-workflows",
+  "description": "Zwei n8n-Workflows fuer den Sports-Report unter agents.umzwei.de/webhook/sports-report. Leitet Browser-Requests an den lokalen serve_output.py auf Port 8099 weiter.",
+  "workflows": [
+    {
+      "name": "Sports Bets List Proxy",
+      "active": false,
+      "nodes": [
+        {
+          "parameters": {
+            "httpMethod": "GET",
+            "path": "sports-bets",
+            "responseMode": "responseNode",
+            "options": {}
+          },
+          "id": "sports-bets-webhook",
+          "name": "Webhook",
+          "type": "n8n-nodes-base.webhook",
+          "typeVersion": 2,
+          "position": [
+            260,
+            260
+          ]
+        },
+        {
+          "parameters": {
+            "url": "=http://172.28.0.1:8099/api/sports-bets?date={{ $json.query.date || '' }}",
+            "options": {
+              "response": {
+                "response": {
+                  "fullResponse": false
+                }
+              }
+            }
+          },
+          "id": "sports-bets-http",
+          "name": "Fetch Local API",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "position": [
+            540,
+            260
+          ]
+        },
+        {
+          "parameters": {
+            "respondWith": "json",
+            "responseBody": "={{ $json }}",
+            "options": {
+              "responseCode": 200,
+              "responseHeaders": {
+                "entries": [
+                  {
+                    "name": "Access-Control-Allow-Origin",
+                    "value": "*"
+                  }
+                ]
+              }
+            }
+          },
+          "id": "sports-bets-respond",
+          "name": "Respond",
+          "type": "n8n-nodes-base.respondToWebhook",
+          "typeVersion": 1.1,
+          "position": [
+            820,
+            260
+          ]
+        }
+      ],
+      "connections": {
+        "Webhook": {
+          "main": [
+            [
+              {
+                "node": "Fetch Local API",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Fetch Local API": {
+          "main": [
+            [
+              {
+                "node": "Respond",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "Sports Bets Place Proxy",
+      "active": false,
+      "nodes": [
+        {
+          "parameters": {
+            "httpMethod": "POST",
+            "path": "sports-bets-place",
+            "responseMode": "responseNode",
+            "options": {}
+          },
+          "id": "sports-bets-place-webhook",
+          "name": "Webhook",
+          "type": "n8n-nodes-base.webhook",
+          "typeVersion": 2,
+          "position": [
+            260,
+            520
+          ]
+        },
+        {
+          "parameters": {
+            "method": "POST",
+            "url": "http://172.28.0.1:8099/api/sports-bets/place",
+            "sendBody": true,
+            "contentType": "raw",
+            "rawContentType": "application/json",
+            "body": "={{ JSON.stringify($json.body || {}) }}",
+            "options": {
+              "response": {
+                "response": {
+                  "fullResponse": false
+                }
+              }
+            }
+          },
+          "id": "sports-bets-place-http",
+          "name": "Post To Local API",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.2,
+          "position": [
+            540,
+            520
+          ]
+        },
+        {
+          "parameters": {
+            "respondWith": "json",
+            "responseBody": "={{ $json }}",
+            "options": {
+              "responseCode": 200,
+              "responseHeaders": {
+                "entries": [
+                  {
+                    "name": "Access-Control-Allow-Origin",
+                    "value": "*"
+                  }
+                ]
+              }
+            }
+          },
+          "id": "sports-bets-place-respond",
+          "name": "Respond",
+          "type": "n8n-nodes-base.respondToWebhook",
+          "typeVersion": 1.1,
+          "position": [
+            820,
+            520
+          ]
+        }
+      ],
+      "connections": {
+        "Webhook": {
+          "main": [
+            [
+              {
+                "node": "Post To Local API",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Post To Local API": {
+          "main": [
+            [
+              {
+                "node": "Respond",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        }
+      }
+    }
+  ]
+}
