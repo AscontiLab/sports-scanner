@@ -1947,7 +1947,7 @@ def build_backtesting_section() -> str:
     return html
 
 
-def build_wettplan_section(selected_bets: list) -> str:
+def build_wettplan_section(selected_bets: list, report_date_iso: str) -> str:
     """Erzeugt die Wettplan-Sektion mit Bankroll-Status und selektierten Bets."""
     if not selected_bets:
         return '<div class="empty">Kein Wettplan für heute — keine Bets selektiert.</div>'
@@ -1960,15 +1960,21 @@ def build_wettplan_section(selected_bets: list) -> str:
 
     bankroll = budget["bankroll"]
     risk_pct = (total_stake / bankroll * 100) if bankroll > 0 else 0
+    placed_count = sum(1 for b in selected_bets if b.get("placed"))
 
     dd_class = "g" if dd["drawdown_pct"] < 5 else ("y" if dd["drawdown_pct"] < 15 else "o")
 
     html = f"""
+<div class="wettplan-toolbar" data-report-date="{report_date_iso}">
+  <div class="wettplan-note">Klicke auf <strong>In Bankroll</strong>, um eine empfohlene Wette als tatsächlich gespielt zu markieren.</div>
+  <button class="wettplan-refresh" type="button" onclick="refreshSportsBetState()">Status neu laden</button>
+</div>
 <div class="summary">
   <div class="card"><div class="val" style="color:var(--green)">{bankroll:.2f} €</div><div class="lbl">Bankroll</div></div>
   <div class="card"><div class="val">{len(selected_bets)}</div><div class="lbl">Bets heute</div></div>
   <div class="card"><div class="val">{total_stake:.2f} €</div><div class="lbl">Tagesrisiko ({risk_pct:.1f}%)</div></div>
   <div class="card"><div class="val">{n_strong} / {n_value}</div><div class="lbl">Strong / Value</div></div>
+  <div class="card"><div class="val">{placed_count}</div><div class="lbl">In Bankroll</div></div>
   <div class="card"><div class="val {dd_class}">{dd['drawdown_pct']:.1f}%</div><div class="lbl">Drawdown (Peak: {dd['peak']:.0f} €)</div></div>
 </div>
 
@@ -1976,7 +1982,7 @@ def build_wettplan_section(selected_bets: list) -> str:
 <tr>
   <th>Tier</th><th>Spiel</th><th>Tipp</th><th>Anstoß</th>
   <th>Score</th><th>Modell-%</th><th>Beste Quote</th>
-  <th>Edge-%</th><th>Stake</th>
+  <th>Edge-%</th><th>Stake</th><th>Aktion</th>
 </tr>"""
 
     for b in selected_bets:
@@ -1989,6 +1995,10 @@ def build_wettplan_section(selected_bets: list) -> str:
         ec = edge_class(b.get("edge_pct", 0))
         score = b.get("confidence_score", 0)
         score_color = "var(--green)" if score >= 70 else ("var(--cyan)" if score >= 45 else "var(--dim)")
+        pred_id = b.get("_pred_id", "")
+        button_label = "In Bankroll" if not b.get("placed") else "Im Bankroll"
+        button_class = "bet-btn placed" if b.get("placed") else "bet-btn"
+        status_label = "Noch nicht gesetzt" if not b.get("placed") else f"Gesetzt: {b.get('actual_stake_eur', b.get('stake_eur', 0)):.2f} €"
 
         html += f"""<tr>
   <td>{tier_badge}</td>
@@ -2000,6 +2010,12 @@ def build_wettplan_section(selected_bets: list) -> str:
   <td>{b.get('best_odds', 0):.2f}</td>
   <td class="{ec}">{b.get('edge_pct', 0):.1f}%</td>
   <td style="color:var(--green);font-weight:700">{b.get('stake_eur', 0):.2f} €</td>
+  <td>
+    <div class="bet-action" data-prediction-id="{pred_id}" data-default-stake="{b.get('stake_eur', 0):.2f}">
+      <button type="button" class="{button_class}" onclick="toggleSportsBetPlacement(this)">{button_label}</button>
+      <div class="bet-status">{status_label}</div>
+    </div>
+  </td>
 </tr>"""
 
     html += "</table>"
@@ -2011,6 +2027,7 @@ def generate_html(football_bets: list, ou_bets: list,
                   selected_bets: list | None = None,
                   btts_signals: list | None = None) -> str:
     date_str  = datetime.now().strftime("%d.%m.%Y")
+    report_date_iso = datetime.now().strftime("%Y-%m-%d")
     timestamp = datetime.now().strftime("%d.%m.%Y %H:%M")
     real_tennis_bets = [b for b in tennis_bets if b.get("model_source") != "Konsens"]
     total     = len(football_bets) + len(ou_bets) + len(real_tennis_bets) + len(uefa_bets)
@@ -2022,7 +2039,7 @@ def generate_html(football_bets: list, ou_bets: list,
     if selected_bets is None:
         selected_bets = []
 
-    wettplan_html = build_wettplan_section(selected_bets)
+    wettplan_html = build_wettplan_section(selected_bets, report_date_iso)
 
     return f"""<!DOCTYPE html>
 <html lang="de">
@@ -2030,6 +2047,16 @@ def generate_html(football_bets: list, ou_bets: list,
 <meta charset="utf-8">
 <title>Sports Value Scanner {date_str}</title>
 <style>{CSS}</style>
+<style>
+.wettplan-toolbar{{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:8px 0 14px;flex-wrap:wrap}}
+.wettplan-note{{color:var(--dim);font-size:.95em}}
+.wettplan-refresh{{background:rgba(0,240,255,0.08);border:1px solid var(--border);color:var(--cyan);border-radius:8px;padding:8px 12px;cursor:pointer;font:inherit}}
+.bet-action{{display:grid;gap:6px;min-width:140px}}
+.bet-btn{{background:rgba(110,200,124,0.12);border:1px solid rgba(110,200,124,0.35);color:var(--green);border-radius:8px;padding:8px 10px;cursor:pointer;font:inherit;font-weight:600}}
+.bet-btn.placed{{background:rgba(200,170,110,0.12);border-color:rgba(200,170,110,0.35);color:var(--gold)}}
+.bet-btn.loading{{opacity:.65;cursor:wait}}
+.bet-status{{font-size:.8em;color:var(--dim);line-height:1.35}}
+</style>
 </head>
 <body>
 <h1>📊 Sports Value Scanner — {date_str}</h1>
@@ -2095,6 +2122,74 @@ def generate_html(football_bets: list, ou_bets: list,
   ⚠️ Diese Analyse dient ausschließlich zu Informationszwecken.
   Sportwetten sind mit erheblichen Verlustrisiken verbunden.
 </div>
+<script>
+async function refreshSportsBetState(){{
+  const toolbar=document.querySelector('.wettplan-toolbar');
+  if(!toolbar) return;
+  const date=toolbar.dataset.reportDate;
+  try {{
+    const resp=await fetch(`/api/sports-bets?date=${{encodeURIComponent(date)}}`);
+    if(!resp.ok) throw new Error('State-Load fehlgeschlagen');
+    const data=await resp.json();
+    const byId=new Map((data.recommended||[]).map(row=>[String(row.prediction_id),row]));
+    document.querySelectorAll('.bet-action').forEach((wrap)=>{{
+      const row=byId.get(wrap.dataset.predictionId);
+      if(!row) return;
+      const btn=wrap.querySelector('.bet-btn');
+      const status=wrap.querySelector('.bet-status');
+      btn.classList.toggle('placed', !!row.placed);
+      btn.classList.remove('loading');
+      btn.textContent=row.placed ? 'Im Bankroll' : 'In Bankroll';
+      status.textContent=row.placed
+        ? `Gesetzt: ${{(row.actual_stake_eur ?? row.stake_eur ?? 0).toFixed(2)}} €`
+        : 'Noch nicht gesetzt';
+    }});
+  }} catch(err) {{
+    console.error(err);
+  }}
+}}
+
+async function toggleSportsBetPlacement(button){{
+  const wrap=button.closest('.bet-action');
+  if(!wrap) return;
+  const predictionId=Number(wrap.dataset.predictionId);
+  const defaultStake=Number(wrap.dataset.defaultStake || '0');
+  const isPlaced=button.classList.contains('placed');
+  let payload={{prediction_id: predictionId, placed: !isPlaced}};
+
+  if(!isPlaced){{
+    const raw=window.prompt('Einsatz in EUR', defaultStake.toFixed(2));
+    if(raw===null) return;
+    const parsed=Number(String(raw).replace(',', '.'));
+    if(!Number.isFinite(parsed) || parsed <= 0){{
+      window.alert('Bitte einen gueltigen Einsatz eingeben.');
+      return;
+    }}
+    payload.actual_stake_eur=parsed;
+  }}
+
+  button.classList.add('loading');
+  try {{
+    const resp=await fetch('/api/sports-bets/place', {{
+      method:'POST',
+      headers:{{'Content-Type':'application/json'}},
+      body:JSON.stringify(payload)
+    }});
+    const data=await resp.json();
+    if(!resp.ok || !data.ok) {{
+      throw new Error(data.error || 'Aktualisierung fehlgeschlagen');
+    }}
+    await refreshSportsBetState();
+  }} catch(err) {{
+    button.classList.remove('loading');
+    window.alert(err.message || 'Bet konnte nicht aktualisiert werden.');
+  }}
+}}
+
+document.addEventListener('DOMContentLoaded', () => {{
+  refreshSportsBetState();
+}});
+</script>
 </body>
 </html>"""
 

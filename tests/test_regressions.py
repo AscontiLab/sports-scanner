@@ -27,14 +27,15 @@ def test_record_daily_snapshot_recomputes_same_day_bankroll(tmp_path):
                 tip, outcome_side, ou_line,
                 model_prob, model_source, lam_home, lam_away, elo_home, elo_away,
                 best_odds, best_odds_bookie, consensus_prob, overround,
-                edge_pct, kelly_pct, stake_units, selected, bet_won, pnl_eur
+                edge_pct, kelly_pct, stake_units, selected, placed,
+                actual_stake_eur, bet_won, pnl_eur, actual_pnl_eur
             ) VALUES (
                 1, NULL, 'soccer_epl', '1x2',
                 'A', 'B', '2026-03-14T12:00:00Z',
                 'A', 'home', NULL,
                 0.55, 'Poisson', NULL, NULL, NULL, NULL,
                 2.0, 'bm1', 0.5, 0.06,
-                5.0, 1.0, 1.0, 1, 1, 10.0
+                5.0, 1.0, 1.0, 1, 1, 10.0, 1, 10.0, 10.0
             )
             """
         )
@@ -50,7 +51,7 @@ def test_record_daily_snapshot_recomputes_same_day_bankroll(tmp_path):
         conn.execute(
             """
             UPDATE predictions
-            SET pnl_eur = 20.0
+            SET actual_pnl_eur = 20.0
             WHERE commence_time = '2026-03-14T12:00:00Z'
             """
         )
@@ -124,6 +125,102 @@ def test_log_prediction_stores_outcome_specific_consensus(tmp_path):
                                (1 / 3.8) / (1 / 2.2 + 1 / 3.4 + 1 / 3.8)) / 2
     assert round(consensus_prob, 6) == round(expected_away_consensus, 6)
     assert best_bookie == "bm1"
+
+
+def test_manual_placement_tracks_actual_stake_and_result(tmp_path):
+    db_path = tmp_path / "sports_backtesting.db"
+    backtesting.init_db(db_path)
+    run_id = backtesting.log_scan_run("2026-03-14T10:00:00Z", model_version="test")
+
+    bet = {
+        "sport": "soccer_epl",
+        "match": "Home – Away",
+        "tip": "Home",
+        "kick_off": "2026-03-14T18:00:00Z",
+        "model_prob": 0.55,
+        "best_odds": 2.5,
+        "edge_pct": 6.0,
+        "kelly_pct": 1.2,
+        "stake_eur": 12.0,
+        "tier": "Strong Pick",
+        "confidence_score": 74,
+        "selected": 1,
+    }
+
+    prediction_id = backtesting.log_prediction(run_id, bet)
+    placed = backtesting.set_prediction_placed(prediction_id, 1, 15.0)
+    assert placed["placed"] == 1
+    assert placed["actual_stake_eur"] == 15.0
+
+    result = backtesting.update_result(prediction_id, 2, 1)
+    assert result["pnl_eur"] == 18.0
+    assert result["actual_pnl_eur"] == 22.5
+
+    with sqlite3.connect(db_path) as conn:
+        actual = conn.execute(
+            "SELECT placed, actual_stake_eur, actual_pnl_eur FROM predictions WHERE id = ?",
+            (prediction_id,),
+        ).fetchone()
+
+    assert actual[0] == 1
+    assert actual[1] == 15.0
+    assert actual[2] == 22.5
+
+
+def test_bankroll_uses_only_placed_bets(tmp_path):
+    db_path = tmp_path / "sports_backtesting.db"
+    backtesting.init_db(db_path)
+    bankroll_manager._DB_PATH = db_path
+    bankroll_manager.init_bankroll(100.0)
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO predictions (
+                run_id, odds_api_match_id, sport_key, bet_type,
+                home_team, away_team, commence_time,
+                tip, outcome_side, ou_line,
+                model_prob, model_source, lam_home, lam_away, elo_home, elo_away,
+                best_odds, best_odds_bookie, consensus_prob, overround,
+                edge_pct, kelly_pct, stake_units, stake_eur, pnl_eur,
+                selected, placed, actual_stake_eur, actual_pnl_eur, bet_won
+            ) VALUES (
+                1, NULL, 'soccer_epl', '1x2',
+                'A', 'B', '2026-03-14T12:00:00Z',
+                'A', 'home', NULL,
+                0.55, 'Poisson', NULL, NULL, NULL, NULL,
+                2.0, 'bm1', 0.5, 0.06,
+                5.0, 1.0, 1.0, 10.0, 10.0,
+                1, 0, NULL, NULL, 1
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO predictions (
+                run_id, odds_api_match_id, sport_key, bet_type,
+                home_team, away_team, commence_time,
+                tip, outcome_side, ou_line,
+                model_prob, model_source, lam_home, lam_away, elo_home, elo_away,
+                best_odds, best_odds_bookie, consensus_prob, overround,
+                edge_pct, kelly_pct, stake_units, stake_eur, pnl_eur,
+                selected, placed, actual_stake_eur, actual_pnl_eur, bet_won
+            ) VALUES (
+                1, NULL, 'soccer_epl', '1x2',
+                'C', 'D', '2026-03-14T15:00:00Z',
+                'C', 'home', NULL,
+                0.55, 'Poisson', NULL, NULL, NULL, NULL,
+                2.0, 'bm1', 0.5, 0.06,
+                5.0, 1.0, 1.0, 12.0, 12.0,
+                1, 1, 20.0, 20.0, 1
+            )
+            """
+        )
+
+    summary = bankroll_manager.update_bankroll_from_results()
+    assert summary["bankroll"] == 120.0
+    assert summary["total_pnl"] == 20.0
+    assert summary["resolved_bets"] == 1
 
 
 def test_confidence_score_uses_bet_specific_training_matches():

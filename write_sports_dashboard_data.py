@@ -19,100 +19,110 @@ from bankroll_manager import (
     get_peak_and_drawdown,
     update_bankroll_from_results,
     generate_tuning_report,
+    rebuild_all_snapshots,
 )
+from backtesting import get_recommended_predictions
 from config import STARTING_BANKROLL, ALL_LABELS
 
 _DB_PATH = Path(__file__).parent / "sports_backtesting.db"
 _OUTPUT_DIR = Path(__file__).parent / "output"
 
 
+def _format_prediction_row(r: sqlite3.Row) -> dict:
+    status = "offen"
+    if r["bet_won"] == 1:
+        status = "gewonnen"
+    elif r["bet_won"] == 0:
+        status = "verloren"
+
+    return {
+        "prediction_id": r["id"],
+        "league": ALL_LABELS.get(r["sport_key"], r["sport_key"]),
+        "match": f"{r['home_team']} – {r['away_team']}",
+        "tip": r["tip"],
+        "odds": r["best_odds"],
+        "edge": round(r["edge_pct"], 1),
+        "stake": r["stake_eur"],
+        "actual_stake": r["actual_stake_eur"],
+        "tier": r["tier"],
+        "score": r["confidence_score"],
+        "placed": bool(r["placed"]),
+        "placed_at": r["placed_at"],
+        "status": status,
+        "pnl": round(r["actual_pnl_eur"], 2) if r["actual_pnl_eur"] is not None else None,
+        "model_pnl": round(r["pnl_eur"], 2) if r["pnl_eur"] is not None else None,
+        "kick_off": r["commence_time"],
+        "bet_type": r["bet_type"],
+    }
+
+
 def _get_todays_bets() -> list[dict]:
-    """Liest heutige Selected Bets aus der DB (dedupliziert)."""
+    """Liest heutige tatsächlich platzierte Bets aus der DB."""
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     conn = sqlite3.connect(_DB_PATH)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         """
-        SELECT sport_key, home_team, away_team, tip,
-               MAX(best_odds) AS best_odds,
-               edge_pct, MAX(stake_eur) AS stake_eur, tier,
-               confidence_score, bet_won, pnl_eur,
+        SELECT id, sport_key, home_team, away_team, tip,
+               best_odds, edge_pct, stake_eur, actual_stake_eur, tier,
+               confidence_score, placed, placed_at, bet_won, pnl_eur, actual_pnl_eur,
                commence_time, bet_type
         FROM predictions
-        WHERE selected = 1
+        WHERE placed = 1
           AND SUBSTR(commence_time, 1, 10) = ?
-        GROUP BY home_team, away_team, tip
         ORDER BY commence_time ASC
         """,
         (today,),
     ).fetchall()
     conn.close()
+    return [_format_prediction_row(r) for r in rows]
 
-    labels = ALL_LABELS
-    bets = []
-    for r in rows:
-        status = "offen"
-        if r["bet_won"] == 1:
-            status = "gewonnen"
-        elif r["bet_won"] == 0:
-            status = "verloren"
 
-        bets.append({
-            "league": labels.get(r["sport_key"], r["sport_key"]),
+def _get_todays_recommendations() -> list[dict]:
+    """Liest heutige Scanner-Empfehlungen inkl. Platzierungsstatus."""
+    rows = get_recommended_predictions(datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+    return [
+        {
+            "prediction_id": r["id"],
+            "league": ALL_LABELS.get(r["sport_key"], r["sport_key"]),
             "match": f"{r['home_team']} – {r['away_team']}",
             "tip": r["tip"],
             "odds": r["best_odds"],
             "edge": round(r["edge_pct"], 1),
             "stake": r["stake_eur"],
+            "actual_stake": r["actual_stake_eur"],
             "tier": r["tier"],
             "score": r["confidence_score"],
-            "status": status,
-            "pnl": round(r["pnl_eur"], 2) if r["pnl_eur"] is not None else None,
+            "placed": bool(r["placed"]),
+            "placed_at": r["placed_at"],
+            "status": "placed" if r["placed"] else "recommended",
             "kick_off": r["commence_time"],
             "bet_type": r["bet_type"],
-        })
-    return bets
+        }
+        for r in rows
+    ]
 
 
 def _get_recent_bets(days: int = 7) -> list[dict]:
-    """Liest die letzten N Tage Selected Bets aus der DB (dedupliziert)."""
+    """Liest die letzten N tatsächlich platzierten resolved Bets aus der DB."""
     conn = sqlite3.connect(_DB_PATH)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         """
-        SELECT sport_key, home_team, away_team, tip,
-               ROUND(MAX(best_odds), 2) AS best_odds,
-               edge_pct, MAX(stake_eur) AS stake_eur, tier,
-               confidence_score, bet_won, pnl_eur,
+        SELECT id, sport_key, home_team, away_team, tip,
+               ROUND(best_odds, 2) AS best_odds,
+               edge_pct, stake_eur, actual_stake_eur, tier,
+               confidence_score, placed, placed_at, bet_won, pnl_eur, actual_pnl_eur,
                commence_time, bet_type
         FROM predictions
-        WHERE selected = 1
+        WHERE placed = 1
           AND bet_won IS NOT NULL
-        GROUP BY home_team, away_team, tip
         ORDER BY commence_time DESC
         LIMIT 50
         """,
     ).fetchall()
     conn.close()
-
-    labels = ALL_LABELS
-    bets = []
-    for r in rows:
-        status = "gewonnen" if r["bet_won"] == 1 else "verloren"
-        bets.append({
-            "league": labels.get(r["sport_key"], r["sport_key"]),
-            "match": f"{r['home_team']} – {r['away_team']}",
-            "tip": r["tip"],
-            "odds": r["best_odds"],
-            "edge": round(r["edge_pct"], 1),
-            "stake": r["stake_eur"],
-            "tier": r["tier"],
-            "score": r["confidence_score"],
-            "status": status,
-            "pnl": round(r["pnl_eur"], 2) if r["pnl_eur"] is not None else None,
-            "kick_off": r["commence_time"],
-        })
-    return bets
+    return [_format_prediction_row(r) for r in rows]
 
 
 def _calculate_streak() -> dict:
@@ -122,7 +132,7 @@ def _calculate_streak() -> dict:
     rows = conn.execute(
         """
         SELECT bet_won FROM predictions
-        WHERE selected = 1 AND bet_won IS NOT NULL
+        WHERE placed = 1 AND bet_won IS NOT NULL
         ORDER BY commence_time DESC
         LIMIT 20
         """,
@@ -148,23 +158,25 @@ def main():
     _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     # Bankroll-Daten
+    rebuild_all_snapshots()
     bankroll_info = update_bankroll_from_results()
     history = get_bankroll_history(limit=60)
     peak_dd = get_peak_and_drawdown()
     streak = _calculate_streak()
     todays_bets = _get_todays_bets()
+    todays_recommendations = _get_todays_recommendations()
     recent_bets = _get_recent_bets()
 
     # Win-Rate und ROI berechnen
     total_resolved = bankroll_info["resolved_bets"]
     conn = sqlite3.connect(_DB_PATH)
     conn.row_factory = sqlite3.Row
-    won = conn.execute(
-        "SELECT COUNT(*) AS cnt FROM predictions WHERE selected=1 AND bet_won=1"
-    ).fetchone()["cnt"]
     total_stake = conn.execute(
-        "SELECT COALESCE(SUM(stake_eur),0) AS total FROM predictions WHERE selected=1 AND bet_won IS NOT NULL"
+        "SELECT COALESCE(SUM(actual_stake_eur),0) AS total FROM predictions WHERE placed=1 AND bet_won IS NOT NULL"
     ).fetchone()["total"]
+    won = conn.execute(
+        "SELECT COUNT(*) AS cnt FROM predictions WHERE placed=1 AND bet_won=1"
+    ).fetchone()["cnt"]
     conn.close()
     win_rate = round(won / total_resolved * 100, 1) if total_resolved > 0 else 0.0
     roi = round(bankroll_info["total_pnl"] / total_stake * 100, 1) if total_stake > 0 else 0.0
@@ -183,6 +195,7 @@ def main():
         "peak_drawdown": peak_dd,
         "streak": streak,
         "history": list(reversed(history)),  # chronologisch
+        "todays_recommendations": todays_recommendations,
         "todays_bets": todays_bets,
         "recent_bets": recent_bets,
     }

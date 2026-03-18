@@ -101,7 +101,11 @@ CREATE TABLE IF NOT EXISTS predictions (
     tier              TEXT,               -- "Strong Pick" | "Value Bet" | "Watch"
     confidence_score  REAL,               -- 0–100
     selected          INTEGER DEFAULT 0,  -- 1 = im Wettplan, 0 = nur Watch
-    pnl_eur           REAL                -- EUR-Profit/Loss nach Spielende
+    pnl_eur           REAL,               -- Modell-PnL nach Spielende
+    placed            INTEGER DEFAULT 0,  -- 1 = tatsaechlich gespielt
+    placed_at         TEXT,               -- ISO-Zeitpunkt der Platzierung
+    actual_stake_eur  REAL,               -- tatsaechlicher Einsatz
+    actual_pnl_eur    REAL                -- tatsaechlicher Profit/Loss
 );
 
 CREATE TABLE IF NOT EXISTS odds_snapshot (
@@ -337,6 +341,10 @@ def _migrate_wettplan_columns(conn: sqlite3.Connection) -> None:
         ("confidence_score", "REAL"),
         ("selected",         "INTEGER DEFAULT 0"),
         ("pnl_eur",          "REAL"),
+        ("placed",           "INTEGER DEFAULT 0"),
+        ("placed_at",        "TEXT"),
+        ("actual_stake_eur", "REAL"),
+        ("actual_pnl_eur",   "REAL"),
     ]
     for col_name, col_type in migrations:
         if col_name not in existing:
@@ -413,6 +421,9 @@ def log_prediction(
     tier = bet_dict.get("tier")
     confidence_score = bet_dict.get("confidence_score")
     selected = bet_dict.get("selected", 0)
+    placed = bet_dict.get("placed", 0)
+    placed_at = bet_dict.get("placed_at")
+    actual_stake_eur = bet_dict.get("actual_stake_eur")
 
     match_id = match_raw.get("id") if match_raw else None
     commence = bet_dict.get("kick_off", "")
@@ -450,7 +461,8 @@ def log_prediction(
                 model_prob, model_source, lam_home, lam_away, elo_home, elo_away,
                 best_odds, best_odds_bookie, consensus_prob, overround,
                 edge_pct, kelly_pct, stake_units,
-                stake_eur, tier, confidence_score, selected
+                stake_eur, tier, confidence_score, selected,
+                placed, placed_at, actual_stake_eur
             ) VALUES (
                 ?, ?, ?, ?,
                 ?, ?, ?,
@@ -458,7 +470,8 @@ def log_prediction(
                 ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?,
                 ?, ?, ?,
-                ?, ?, ?, ?
+                ?, ?, ?, ?,
+                ?, ?, ?
             )
             """,
             (
@@ -489,6 +502,9 @@ def log_prediction(
                 tier,
                 confidence_score,
                 selected,
+                placed,
+                placed_at,
+                actual_stake_eur,
             ),
         )
         prediction_id = cur.lastrowid
@@ -549,6 +565,99 @@ def update_prediction_selection(
             """,
             (confidence_score, tier, stake_eur, selected, prediction_id),
         )
+
+
+def _compute_cash_pnl(
+    best_odds: float | None,
+    stake_eur: float | None,
+    bet_won: int | None,
+    actual_outcome: str | None,
+) -> float | None:
+    """Berechnet Geld-PnL für eine tatsächlich platzierte Wette."""
+    if not stake_eur or stake_eur <= 0:
+        return None
+    if actual_outcome == "push":
+        return 0.0
+    if bet_won == 1 and best_odds:
+        return round((best_odds - 1.0) * stake_eur, 2)
+    if bet_won == 0:
+        return round(-stake_eur, 2)
+    return None
+
+
+def set_prediction_placed(
+    prediction_id: int,
+    placed: int,
+    actual_stake_eur: float | None = None,
+) -> dict:
+    """Markiert eine selektierte Prediction als tatsächlich gespielt oder nimmt sie zurück."""
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id, selected, stake_eur, best_odds, bet_won, actual_outcome
+            FROM predictions
+            WHERE id = ?
+            """,
+            (prediction_id,),
+        ).fetchone()
+
+        if row is None:
+            raise ValueError(f"Prediction {prediction_id} nicht gefunden")
+        if int(row["selected"] or 0) != 1:
+            raise ValueError(f"Prediction {prediction_id} ist keine selektierte Wettplan-Bet")
+
+        placed = 1 if placed else 0
+        placed_at = datetime.now(timezone.utc).isoformat() if placed else None
+        if placed:
+            stake = float(actual_stake_eur) if actual_stake_eur is not None else float(row["stake_eur"] or 0.0)
+            stake = round(max(stake, 0.0), 2)
+            actual_pnl_eur = _compute_cash_pnl(row["best_odds"], stake, row["bet_won"], row["actual_outcome"])
+        else:
+            stake = None
+            actual_pnl_eur = None
+
+        conn.execute(
+            """
+            UPDATE predictions SET
+                placed = ?,
+                placed_at = ?,
+                actual_stake_eur = ?,
+                actual_pnl_eur = ?
+            WHERE id = ?
+            """,
+            (placed, placed_at, stake, actual_pnl_eur, prediction_id),
+        )
+
+    return {
+        "prediction_id": prediction_id,
+        "placed": placed,
+        "placed_at": placed_at,
+        "actual_stake_eur": stake,
+        "actual_pnl_eur": actual_pnl_eur,
+    }
+
+
+def get_recommended_predictions(date_str: str | None = None) -> list[dict]:
+    """Liefert selektierte Wettplan-Bets inkl. Platzierungsstatus."""
+    if date_str is None:
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                id, sport_key, bet_type, home_team, away_team, commence_time,
+                tip, best_odds, edge_pct, stake_eur, actual_stake_eur, tier,
+                confidence_score, placed, placed_at, bet_won, pnl_eur, actual_pnl_eur
+            FROM predictions
+            WHERE selected = 1
+              AND SUBSTR(commence_time, 1, 10) = ?
+            ORDER BY commence_time ASC, confidence_score DESC, id DESC
+            """,
+            (date_str,),
+        ).fetchall()
+
+    return [dict(r) for r in rows]
 
 
 def get_open_predictions() -> list[dict]:
@@ -678,7 +787,7 @@ def update_result(
             bet_won   = 0
             pnl_units = -row["stake_units"]
 
-        # EUR-PnL berechnen (nur wenn Stake in EUR vorhanden)
+        # EUR-PnL berechnen (nur wenn Scanner-Stake in EUR vorhanden)
         pnl_eur = None
         stake_eur = row.get("stake_eur")
         if stake_eur and stake_eur > 0:
@@ -688,6 +797,15 @@ def update_result(
                 pnl_eur = round((row["best_odds"] - 1.0) * stake_eur, 2)
             elif bet_won == 0:
                 pnl_eur = round(-stake_eur, 2)
+
+        actual_pnl_eur = None
+        if row.get("placed"):
+            actual_pnl_eur = _compute_cash_pnl(
+                row.get("best_odds"),
+                row.get("actual_stake_eur"),
+                bet_won,
+                actual_outcome,
+            )
 
         fetched_at = datetime.now(timezone.utc).isoformat()
 
@@ -700,11 +818,12 @@ def update_result(
                 actual_outcome    = ?,
                 bet_won           = ?,
                 pnl_units         = ?,
-                pnl_eur           = ?
+                pnl_eur           = ?,
+                actual_pnl_eur    = ?
             WHERE id = ?
             """,
             (fetched_at, home_score, away_score, actual_outcome,
-             bet_won, pnl_units, pnl_eur, prediction_id),
+             bet_won, pnl_units, pnl_eur, actual_pnl_eur, prediction_id),
         )
 
     return {
@@ -715,6 +834,7 @@ def update_result(
         "bet_won":        bet_won,
         "pnl_units":      pnl_units,
         "pnl_eur":        pnl_eur,
+        "actual_pnl_eur": actual_pnl_eur,
     }
 
 

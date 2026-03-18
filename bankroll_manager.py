@@ -158,11 +158,11 @@ def record_daily_snapshot(
         stats = conn.execute(
             """
             SELECT
-                COALESCE(SUM(pnl_eur), 0.0) AS day_pnl,
+                COALESCE(SUM(actual_pnl_eur), 0.0) AS day_pnl,
                 COUNT(*) AS bets_placed,
                 SUM(CASE WHEN bet_won = 1 THEN 1 ELSE 0 END) AS bets_won
             FROM predictions
-            WHERE selected = 1
+            WHERE placed = 1
               AND SUBSTR(commence_time, 1, 10) = ?
               AND bet_won IS NOT NULL
             """,
@@ -205,19 +205,19 @@ def record_daily_snapshot(
 
 def rebuild_all_snapshots() -> None:
     """
-    Erstellt/aktualisiert Snapshots fuer ALLE Tage mit resolved Selected Bets.
+    Erstellt/aktualisiert Snapshots fuer ALLE Tage mit resolved platzierten Bets.
 
     Das Problem: record_daily_snapshot(today) schreibt nur den heutigen Snapshot,
     aber Bets von gestern werden erst heute resolved. Diese Funktion baut alle
     historischen Snapshots korrekt auf, kumulativ ab STARTING_BANKROLL.
     """
     with _connect() as conn:
-        # Alle Tage mit resolved selected Bets
+        # Alle Tage mit resolved platzierten Bets
         days = conn.execute(
             """
             SELECT DISTINCT SUBSTR(commence_time, 1, 10) AS day
             FROM predictions
-            WHERE selected = 1 AND bet_won IS NOT NULL
+            WHERE placed = 1 AND bet_won IS NOT NULL
             ORDER BY day
             """
         ).fetchall()
@@ -239,11 +239,11 @@ def rebuild_all_snapshots() -> None:
             stats = conn.execute(
                 """
                 SELECT
-                    COALESCE(SUM(pnl_eur), 0.0) AS day_pnl,
+                    COALESCE(SUM(actual_pnl_eur), 0.0) AS day_pnl,
                     COUNT(*) AS bets_placed,
                     SUM(CASE WHEN bet_won = 1 THEN 1 ELSE 0 END) AS bets_won
                 FROM predictions
-                WHERE selected = 1
+                WHERE placed = 1
                   AND SUBSTR(commence_time, 1, 10) = ?
                   AND bet_won IS NOT NULL
                 """,
@@ -475,9 +475,9 @@ def generate_tuning_report() -> dict:
 
 def update_bankroll_from_results() -> dict:
     """
-    Aktualisiert die Bankroll basierend auf allen resolved Bets mit pnl_eur.
-    Berechnet die aktuelle Bankroll als: STARTING_BANKROLL + Summe aller pnl_eur
-    der selektierten Bets.
+    Aktualisiert die Bankroll basierend auf allen tatsächlich platzierten Bets.
+    Berechnet die aktuelle Bankroll als: STARTING_BANKROLL + Summe aller actual_pnl_eur
+    der platzierten Bets.
 
     Returns:
         {"bankroll": float, "total_pnl": float, "resolved_bets": int}
@@ -486,12 +486,12 @@ def update_bankroll_from_results() -> dict:
         row = conn.execute(
             """
             SELECT
-                COALESCE(SUM(pnl_eur), 0.0) AS total_pnl,
+                COALESCE(SUM(actual_pnl_eur), 0.0) AS total_pnl,
                 COUNT(*) AS resolved_bets
             FROM predictions
-            WHERE selected = 1
+            WHERE placed = 1
               AND bet_won IS NOT NULL
-              AND pnl_eur IS NOT NULL
+              AND actual_pnl_eur IS NOT NULL
             """
         ).fetchone()
 

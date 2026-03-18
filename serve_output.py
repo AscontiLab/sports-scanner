@@ -7,6 +7,7 @@ Dient nur zum Lesen der Output-Dateien (sports_signals.html, kicktipp_data.json 
 
 import json
 import os
+import sqlite3
 import sys
 from datetime import date
 from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -83,6 +84,61 @@ def _sort_signals(signals):
         ),
         reverse=True,
     )
+
+
+def _sports_bets_payload(date_str: str | None = None):
+    """Liefert empfohlene und platzierte Sports-Bets für das Dashboard."""
+    if date_str is None:
+        from datetime import datetime, timezone
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    db_path = Path("/home/claude-agent/sports-scanner/sports_backtesting.db")
+    if not db_path.exists():
+        return {"date": date_str, "recommended": [], "placed": []}
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """
+        SELECT
+            id, sport_key, bet_type, home_team, away_team, commence_time,
+            tip, best_odds, edge_pct, stake_eur, actual_stake_eur, tier,
+            confidence_score, placed, placed_at, bet_won, actual_pnl_eur
+        FROM predictions
+        WHERE selected = 1
+          AND SUBSTR(commence_time, 1, 10) = ?
+        ORDER BY commence_time ASC, confidence_score DESC, id DESC
+        """,
+        (date_str,),
+    ).fetchall()
+    conn.close()
+
+    recommended = []
+    for r in rows:
+        recommended.append({
+            "prediction_id": r["id"],
+            "sport_key": r["sport_key"],
+            "bet_type": r["bet_type"],
+            "match": f"{r['home_team']} – {r['away_team']}",
+            "tip": r["tip"],
+            "odds": r["best_odds"],
+            "edge_pct": r["edge_pct"],
+            "stake_eur": r["stake_eur"],
+            "actual_stake_eur": r["actual_stake_eur"],
+            "tier": r["tier"],
+            "confidence_score": r["confidence_score"],
+            "placed": bool(r["placed"]),
+            "placed_at": r["placed_at"],
+            "bet_won": r["bet_won"],
+            "actual_pnl_eur": r["actual_pnl_eur"],
+            "commence_time": r["commence_time"],
+        })
+
+    return {
+        "date": date_str,
+        "recommended": recommended,
+        "placed": [row for row in recommended if row["placed"]],
+    }
 
 
 class OutputHandler(SimpleHTTPRequestHandler):
@@ -250,6 +306,11 @@ class OutputHandler(SimpleHTTPRequestHandler):
             self._json_response(data or {})
             return True
 
+        if path == "/api/sports-bets":
+            date_str = qs.get("date", [""])[0] or None
+            self._json_response(_sports_bets_payload(date_str))
+            return True
+
         return False
 
     def _check_path_traversal(self, file_path: Path, base_dir: Path) -> bool:
@@ -346,6 +407,56 @@ class OutputHandler(SimpleHTTPRequestHandler):
         self.send_response(403)
         self.end_headers()
         self.wfile.write(b"Forbidden")
+
+    def do_POST(self):
+        """Erlaubt operative Aktionen für Sports-Bets (nur localhost/Docker)."""
+        if not self._check_put_allowed():
+            return
+
+        if self.path == "/api/sports-bets/place":
+            try:
+                from backtesting import set_prediction_placed
+                from write_sports_dashboard_data import main as refresh_sports_dashboard_data
+            except Exception:
+                self._json_response({"ok": False, "error": "Backtesting-Modul nicht ladbar"}, 500)
+                return
+
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length) if content_length > 0 else b"{}"
+            try:
+                payload = json.loads(body.decode("utf-8"))
+            except Exception:
+                self._json_response({"ok": False, "error": "Ungueltiges JSON"}, 400)
+                return
+
+            prediction_id = payload.get("prediction_id")
+            if not isinstance(prediction_id, int):
+                self._json_response({"ok": False, "error": "prediction_id muss int sein"}, 400)
+                return
+
+            placed = 1 if payload.get("placed", True) else 0
+            actual_stake_eur = payload.get("actual_stake_eur")
+
+            try:
+                result = set_prediction_placed(prediction_id, placed, actual_stake_eur)
+            except ValueError as exc:
+                self._json_response({"ok": False, "error": str(exc)}, 400)
+                return
+            except Exception:
+                self._json_response({"ok": False, "error": "Bet konnte nicht aktualisiert werden"}, 500)
+                return
+
+            try:
+                refresh_sports_dashboard_data()
+            except Exception:
+                pass
+
+            self._json_response({"ok": True, "placement": result})
+            return
+
+        self.send_response(404)
+        self.end_headers()
+        self.wfile.write(b"Not found")
 
     def log_message(self, format, *args):
         pass  # Kein Log-Spam
