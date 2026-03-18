@@ -41,6 +41,10 @@ else
     git commit -m "backup: SQL-Dump sports_backtesting $(date +%Y-%m-%d)
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
-    git push origin master
-    echo "[Backup] Dump committed und gepusht."
+    if git push origin master; then
+        echo "[Backup] Dump committed und gepusht."
+    else
+        echo "[Backup] FEHLER beim Push nach origin/master (Exit-Code: $?)"
+        exit 1
+    fi
 fi

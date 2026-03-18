@@ -26,8 +26,10 @@ CLI:
 """
 
 import json
+import re
 import sqlite3
 import time
+import numpy as np
 from datetime import datetime, timezone, timedelta
 from difflib import get_close_matches
 from pathlib import Path
@@ -240,7 +242,6 @@ def _calc_market_meta(
         fallback_bookie = best_bookies.get(outcome_side) if outcome_side else None
         return None, None, fallback_bookie
 
-    import numpy as np
     consensus_probs = {
         side: float(np.mean(values)) if values else None
         for side, values in implied.items()
@@ -262,16 +263,18 @@ def _calc_market_meta(
     return selected_consensus, overround, selected_bookie
 
 
-def _fetch_with_retry(url: str, retries: int = 3) -> list[dict]:
+def _fetch_with_retry(url: str, params: dict | None = None,
+                      retries: int = 3) -> list[dict]:
     """HTTP GET mit Retry-Logik und exponentiellem Backoff."""
-    import urllib.request
+    import requests as _requests
 
     delays = [2, 4, 8]
     last_error = None
     for attempt in range(retries):
         try:
-            with urllib.request.urlopen(url, timeout=15) as resp:
-                return json.loads(resp.read().decode())
+            r = _requests.get(url, params=params, timeout=15)
+            r.raise_for_status()
+            return r.json()
         except Exception as e:
             last_error = e
             if attempt < retries - 1:
@@ -348,6 +351,8 @@ def _migrate_wettplan_columns(conn: sqlite3.Connection) -> None:
     ]
     for col_name, col_type in migrations:
         if col_name not in existing:
+            assert re.fullmatch(r'[a-z_]+', col_name), f"Ungueltiger Spaltenname: {col_name}"
+            assert re.fullmatch(r'[A-Z ]+[0-9]*', col_type), f"Ungueltiger Typ: {col_type}"
             conn.execute(f"ALTER TABLE predictions ADD COLUMN {col_name} {col_type}")
             print(f"[Backtesting] Migration: Spalte '{col_name}' hinzugefügt")
 
@@ -380,6 +385,17 @@ def log_scan_run(
             ),
         )
         return cur.lastrowid
+
+
+def update_scan_run_training(run_id: int, training_matches: int | None) -> None:
+    """Aktualisiert training_matches eines bestehenden Scan-Runs (nachträglich)."""
+    if training_matches is None:
+        return
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE scan_runs SET training_matches = ? WHERE id = ?",
+            (training_matches, run_id),
+        )
 
 
 def log_prediction(
@@ -880,18 +896,10 @@ def void_prediction(prediction_id: int) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _load_api_key() -> str:
-    """Liest ODDS_API_KEY aus ~/.stock_scanner_credentials (KEY=VALUE-Format)."""
-    creds_path = Path.home() / ".stock_scanner_credentials"
-    try:
-        for line in creds_path.read_text().splitlines():
-            line = line.strip()
-            if line.startswith("ODDS_API_KEY"):
-                parts = line.split("=", 1)
-                if len(parts) == 2:
-                    return parts[1].strip().strip('"').strip("'")
-    except Exception:
-        pass
-    return ""
+    """Liest ODDS_API_KEY aus ~/.stock_scanner_credentials via config.load_credentials()."""
+    from config import load_credentials
+    creds = load_credentials()
+    return creds.get("ODDS_API_KEY", "")
 
 
 def _extract_scores(entry: dict) -> tuple[int | None, int | None]:
@@ -979,12 +987,11 @@ def resolve_results(api_key: str | None = None) -> dict:
         match_map = by_sport.get(sport_key, {})
         no_id_preds = no_id_by_sport.get(sport_key, [])
 
-        url = (
-            f"https://api.the-odds-api.com/v4/sports/{sport_key}/scores"
-            f"?apiKey={api_key}&daysFrom={days_from}"
-        )
+        url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/scores"
         try:
-            scores_data = _fetch_with_retry(url)
+            scores_data = _fetch_with_retry(
+                url, params={"apiKey": api_key, "daysFrom": days_from}
+            )
         except Exception as e:
             # API-Key aus Fehlermeldungen entfernen
             err_msg = str(e)

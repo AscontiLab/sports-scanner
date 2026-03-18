@@ -5,6 +5,7 @@ Läuft auf Port 8099, erreichbar vom n8n-Docker-Container via 172.28.0.1:8099.
 Dient nur zum Lesen der Output-Dateien (sports_signals.html, kicktipp_data.json etc.).
 """
 
+import hmac
 import json
 import os
 import sqlite3
@@ -21,6 +22,16 @@ BASE_DIRS = {
     "/stock/": Path("/home/claude-agent/stock-scanner/output"),
     "/hub/": Path("/home/claude-agent/hub"),
 }
+
+# Bearer-Token für GET /api/* Endpoints (optional, abwärtskompatibel)
+from config import load_credentials
+_creds = load_credentials()
+_SPORTS_API_TOKEN = _creds.get("SPORTS_API_TOKEN") or None
+
+if _SPORTS_API_TOKEN:
+    print(f"[Auth] SPORTS_API_TOKEN konfiguriert — API-Endpoints geschützt")
+else:
+    print("[Auth] WARNUNG: Kein SPORTS_API_TOKEN in ~/.stock_scanner_credentials — API-Endpoints ungeschützt")
 
 
 def _sports_dirs():
@@ -96,22 +107,21 @@ def _sports_bets_payload(date_str: str | None = None):
     if not db_path.exists():
         return {"date": date_str, "recommended": [], "placed": []}
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        """
-        SELECT
-            id, sport_key, bet_type, home_team, away_team, commence_time,
-            tip, best_odds, edge_pct, stake_eur, actual_stake_eur, tier,
-            confidence_score, placed, placed_at, bet_won, actual_pnl_eur
-        FROM predictions
-        WHERE selected = 1
-          AND SUBSTR(commence_time, 1, 10) = ?
-        ORDER BY commence_time ASC, confidence_score DESC, id DESC
-        """,
-        (date_str,),
-    ).fetchall()
-    conn.close()
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT
+                id, sport_key, bet_type, home_team, away_team, commence_time,
+                tip, best_odds, edge_pct, stake_eur, actual_stake_eur, tier,
+                confidence_score, placed, placed_at, bet_won, actual_pnl_eur
+            FROM predictions
+            WHERE selected = 1
+              AND SUBSTR(commence_time, 1, 10) = ?
+            ORDER BY commence_time ASC, confidence_score DESC, id DESC
+            """,
+            (date_str,),
+        ).fetchall()
 
     recommended = []
     for r in rows:
@@ -142,6 +152,20 @@ def _sports_bets_payload(date_str: str | None = None):
 
 
 class OutputHandler(SimpleHTTPRequestHandler):
+
+    def _check_api_auth(self) -> bool:
+        """Prüft Bearer-Token für GET /api/* Endpoints.
+        Gibt True zurück wenn Zugriff erlaubt, False wenn abgelehnt (Response bereits gesendet)."""
+        if _SPORTS_API_TOKEN is None:
+            return True  # kein Token konfiguriert → abwärtskompatibel
+        auth_header = self.headers.get("Authorization", "")
+        if hmac.compare_digest(auth_header, f"Bearer {_SPORTS_API_TOKEN}"):
+            return True
+        self.send_response(401)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(b'{"error": "Unauthorized"}')
+        return False
 
     def _json_response(self, data, status=200):
         self.send_response(status)
@@ -338,6 +362,8 @@ class OutputHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
         # API endpoints first
         if self.path.startswith("/api/"):
+            if not self._check_api_auth():
+                return
             if self._handle_api():
                 return
 

@@ -192,8 +192,8 @@ MODEL_TRUST_FLOOR = 0.05             # Minimaler Trust-Multiplikator
 # HARD FILTERS (basierend auf Performance-Analyse)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-MAX_EDGE_HARD_CAP = 99.0              # Deaktiviert — wird am 2026-03-30 mit Daten neu bewertet
-MAX_ODDS_SELECTED = 99.0              # Deaktiviert — wird am 2026-03-30 mit Daten neu bewertet
+MAX_EDGE_HARD_CAP = None               # Deaktiviert — wird am 2026-03-30 mit Daten neu bewertet
+MAX_ODDS_SELECTED = None               # Deaktiviert — wird am 2026-03-30 mit Daten neu bewertet
 OU_BONUS_POINTS = 12.0                # O/U-Wetten: +12 Punkte Confidence Bonus (41.7% Win-Rate)
 PENALTY_1X2_POINTS = 4.0              # 1X2-Wetten: -4 Punkte (Draws ausgenommen, siehe bet_selector)
 

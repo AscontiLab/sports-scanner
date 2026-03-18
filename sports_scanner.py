@@ -4,7 +4,7 @@ Sports Betting Value Scanner
 ────────────────────────────
 Analysiert Fußball (1./2./3. Bundesliga, Premier League) und UEFA-Wettbewerbe
 (Champions League, Europa League, Conference League) mit Poisson-Modell
-sowie Tennis (ATP) mit Elo-Modell.
+sowie Tennis (ATP + WTA) mit Elo-Modell.
 
 Datenquellen:
   - Fußball-History: football-data.co.uk (Bundesliga + Top-5-Ligen)
@@ -28,7 +28,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from scipy.stats import poisson
 from scipy.optimize import minimize
-from backtesting import init_db, log_scan_run, log_prediction, resolve_results, get_summary, update_prediction_selection
+from backtesting import init_db, log_scan_run, log_prediction, resolve_results, get_summary, update_prediction_selection, update_scan_run_training
 from alerts import send_high_edge_alerts, send_tuning_alert
 from config import (
     SCRIPT_DIR, OUTPUT_DIR, CREDS_FILE,
@@ -391,7 +391,8 @@ def get_active_sports(api_key: str) -> list:
     return r.json()
 
 
-def get_odds(api_key: str, sport_key: str, markets: str = "h2h,totals") -> list:
+def get_odds(api_key: str, sport_key: str, markets: str = "h2h,totals") -> tuple[list, int | None]:
+    """Holt Odds von der API. Gibt (matches, remaining_quota) zurück."""
     params = {
         "apiKey":     api_key,
         "regions":    "eu",
@@ -404,17 +405,16 @@ def get_odds(api_key: str, sport_key: str, markets: str = "h2h,totals") -> list:
                                 params=params, timeout=20)
     except requests.exceptions.HTTPError as e:
         if e.response is not None and e.response.status_code == 404:
-            return []
+            return [], None
         raise
     remaining = r.headers.get("x-requests-remaining", "?")
     try:
         remaining_int = int(remaining)
     except Exception:
         remaining_int = None
-    global ODDS_API_REMAINING
-    ODDS_API_REMAINING = remaining_int
-    print(f"    → {len(r.json())} Matches | API-Requests verbleibend: {remaining}")
-    return r.json()
+    data = r.json()
+    print(f"    → {len(data)} Matches | API-Requests verbleibend: {remaining}")
+    return data, remaining_int
 
 
 def best_odds_from_match(match: dict) -> dict:
@@ -503,6 +503,36 @@ def enrich_bets_with_market_data(bets: list, match: dict) -> None:
                 overrounds.append(s - 1)
     avg_overround = float(np.mean(overrounds)) if overrounds else None
 
+    # Totals-Konsens berechnen (Over/Under normalisiert über alle Bookies)
+    totals_consensus: dict[float, dict[str, float]] = {}  # line → {"over": prob, "under": prob}
+    for bm in match.get("bookmakers", []):
+        for market in bm.get("markets", []):
+            if market["key"] != "totals":
+                continue
+            by_line: dict[float, dict[str, float]] = {}
+            for o in market["outcomes"]:
+                line = float(o.get("point", 0))
+                price = float(o["price"])
+                side = o["name"].lower()  # "over" or "under"
+                if line not in by_line:
+                    by_line[line] = {}
+                by_line[line][side] = price
+            for line, sides in by_line.items():
+                if "over" in sides and "under" in sides:
+                    total_impl = 1 / sides["over"] + 1 / sides["under"]
+                    if total_impl > 0:
+                        if line not in totals_consensus:
+                            totals_consensus[line] = {"over": [], "under": []}
+                        totals_consensus[line]["over"].append((1 / sides["over"]) / total_impl)
+                        totals_consensus[line]["under"].append((1 / sides["under"]) / total_impl)
+    # Mittelwerte bilden
+    totals_consensus_avg: dict[float, dict[str, float]] = {}
+    for line, sides in totals_consensus.items():
+        totals_consensus_avg[line] = {
+            "over": float(np.mean(sides["over"])) if sides["over"] else 0.0,
+            "under": float(np.mean(sides["under"])) if sides["under"] else 0.0,
+        }
+
     for b in bets:
         b["overround"] = avg_overround
         # Konsens-Prob für die getippte Seite ermitteln
@@ -518,6 +548,17 @@ def enrich_bets_with_market_data(bets: list, match: dict) -> None:
             outcome_side = "away"
         elif tip in ("Unentschieden", "Draw"):
             outcome_side = "draw"
+        # Over/Under: Tip enthält "Über X.X" oder "Unter X.X"
+        elif tip.startswith("Über") or tip.startswith("Over"):
+            line = b.get("line")
+            if line is not None and line in totals_consensus_avg:
+                b["consensus_prob"] = totals_consensus_avg[line]["over"]
+            outcome_side = None  # bereits gesetzt
+        elif tip.startswith("Unter") or tip.startswith("Under"):
+            line = b.get("line")
+            if line is not None and line in totals_consensus_avg:
+                b["consensus_prob"] = totals_consensus_avg[line]["under"]
+            outcome_side = None  # bereits gesetzt
         if outcome_side and consensus.get(outcome_side) is not None:
             b["consensus_prob"] = consensus[outcome_side]
 
@@ -531,6 +572,7 @@ def download_clubelo(date: str) -> dict:
     Lädt Club-Elo-Ratings für ein Datum (Format: YYYY-MM-DD).
     Gibt {club_name: elo_rating} zurück.
     """
+    last_err = None
     for url in [CLUBELO_URL_HTTPS.format(date=date), CLUBELO_URL_HTTP.format(date=date)]:
         try:
             r = _request_with_retry(url, timeout=20)
@@ -977,9 +1019,10 @@ def _compute_elo(download_fn, years: list, label: str) -> tuple[dict, dict, int]
     def expected(ra, rb):
         return 1 / (1 + 10 ** ((rb - ra) / 400))
 
-    for _, row in combined.iterrows():
-        w = str(row["winner_name"]).strip()
-        l = str(row["loser_name"]).strip()
+    has_surface = "surface" in combined.columns
+    for row in combined.itertuples(index=False):
+        w = str(row.winner_name).strip()
+        l = str(row.loser_name).strip()
         if not w or not l:
             continue
         # Gesamt-Elo
@@ -990,7 +1033,8 @@ def _compute_elo(download_fn, years: list, label: str) -> tuple[dict, dict, int]
         elo[w] += ELO_K_FACTOR * (1 - e_w)
         elo[l] += ELO_K_FACTOR * (0 - e_l)
         # Surface-Elo
-        surface = str(row.get("surface", "")).strip().capitalize() if pd.notna(row.get("surface")) else None
+        raw_surface = getattr(row, "surface", None) if has_surface else None
+        surface = str(raw_surface).strip().capitalize() if pd.notna(raw_surface) else None
         if surface in surface_elo:
             s_elo = surface_elo[surface]
             s_elo.setdefault(w, ELO_INITIAL)
@@ -1425,6 +1469,26 @@ details[open] summary{margin-bottom:10px}
 # KICKTIPP: PROGNOSEN SAMMELN + HTML/JSON GENERIEREN
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _determine_tendency_and_score(p_home, p_draw, p_away, lam_h, lam_a):
+    """Bestimmt Tendenz und wahrscheinlichstes Score basierend auf Wahrscheinlichkeiten."""
+    if p_home is not None:
+        if p_home >= p_draw and p_home >= p_away:
+            tendency = "Heimsieg"
+        elif p_draw >= p_home and p_draw >= p_away:
+            tendency = "Unentschieden"
+        else:
+            tendency = "Auswärtssieg"
+    else:
+        tendency = "?"
+
+    score_home = score_away = None
+    if lam_h is not None and lam_a is not None:
+        score_home, score_away = predict_most_likely_score(
+            lam_h, lam_a, tendency=tendency if tendency != "?" else None
+        )
+    return tendency, score_home, score_away
+
+
 def collect_kicktipp_predictions(football_models: dict, club_elo_dict: dict,
                                   euro_model: dict | None,
                                   loaded_matches: dict) -> list:
@@ -1491,22 +1555,9 @@ def collect_kicktipp_predictions(football_models: dict, club_elo_dict: dict,
                     lam_a = 1.4 + 0.3 * (p_away - 0.33)
                     model_src = "Konsens"
 
-            # Tendenz bestimmen
-            if p_home is not None:
-                if p_home >= p_draw and p_home >= p_away:
-                    tendency = "Heimsieg"
-                elif p_draw >= p_home and p_draw >= p_away:
-                    tendency = "Unentschieden"
-                else:
-                    tendency = "Auswärtssieg"
-            else:
-                tendency = "?"
-
-            # Score passend zur Tendenz berechnen
-            if lam_h is not None and lam_a is not None:
-                score_home, score_away = predict_most_likely_score(
-                    lam_h, lam_a, tendency=tendency if tendency != "?" else None
-                )
+            tendency, score_home, score_away = _determine_tendency_and_score(
+                p_home, p_draw, p_away, lam_h, lam_a
+            )
 
             results.append({
                 "league":      label,
@@ -1576,22 +1627,9 @@ def collect_kicktipp_predictions(football_models: dict, club_elo_dict: dict,
                     lam_a = 1.4 + 0.3 * (p_away - 0.33)
                     model_src = "Konsens"
 
-            # Tendenz bestimmen
-            if p_home is not None:
-                if p_home >= p_draw and p_home >= p_away:
-                    tendency = "Heimsieg"
-                elif p_draw >= p_home and p_draw >= p_away:
-                    tendency = "Unentschieden"
-                else:
-                    tendency = "Auswärtssieg"
-            else:
-                tendency = "?"
-
-            # Score passend zur Tendenz berechnen
-            if lam_h is not None and lam_a is not None:
-                score_home, score_away = predict_most_likely_score(
-                    lam_h, lam_a, tendency=tendency if tendency != "?" else None
-                )
+            tendency, score_home, score_away = _determine_tendency_and_score(
+                p_home, p_draw, p_away, lam_h, lam_a
+            )
 
             results.append({
                 "league":      label,
@@ -2208,319 +2246,286 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> int:
-    args = parse_args()
-    scan_started_at = datetime.now(timezone.utc).replace(microsecond=0)
-    run_ref = f"sports-{scan_started_at.isoformat()}"
-    print("=" * 60)
-    print(f"  Sports Value Scanner — {datetime.now().strftime('%d.%m.%Y %H:%M')}")
-    print("=" * 60)
+def run_football_scan(api_key: str, run_id: int, loaded_matches: dict) -> tuple[list, list, list, dict, int]:
+    """Fußball-Ligen scannen. Gibt (football_bets, ou_bets, btts_signals, football_models, n_training) zurück."""
+    global ODDS_API_REMAINING
+    all_football_bets = []
+    all_ou_bets = []
+    all_btts_signals = []
+    n_training = 0
 
-    creds = load_credentials()
-    api_key = creds.get("ODDS_API_KEY", "")
-    if not args.dry_run and not api_key:
-        print("ERROR: ODDS_API_KEY fehlt in ~/.stock_scanner_credentials")
-        return 1
+    print("\n[⚽ Fußball] Daten laden & Modelle trainieren …")
+    football_models = {}
 
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    out_dir  = OUTPUT_DIR / date_str
-    out_dir.mkdir(parents=True, exist_ok=True)
+    for sport_key in FOOTBALL_SPORTS:
+        label = SPORT_LABELS.get(sport_key, sport_key)
+        print(f"  {label}:")
+        df = load_football_data(sport_key)
+        if df is None or len(df) < 20:
+            print(f"    Nicht genug Daten ({len(df) if df is not None else 0} Matches) – übersprungen")
+            continue
+        n_teams = df["HomeTeam"].nunique()
+        print(f"    {len(df)} Matches, {n_teams} Teams → trainiere Poisson …")
+        try:
+            model = fit_poisson_model(df)
+            football_models[sport_key] = model
+            n_training += len(df)
+            print(f"    OK. Home-Vorteil={model['home_adv']:.3f}")
+        except Exception as e:
+            print(f"    Modell-Fehler: {e}")
 
-    # ── BACKTESTING ──────────────────────────────────────────────────────────
+    print("\n[⚽ Fußball] Upcoming Matches via Odds API …")
+    for sport_key in FOOTBALL_SPORTS:
+        label = SPORT_LABELS.get(sport_key, sport_key)
+        print(f"  {label}:")
+        try:
+            matches, remaining = get_odds(api_key, sport_key)
+        except Exception as e:
+            print(f"    Fehler: {e}")
+            continue
+        ODDS_API_REMAINING = remaining
+        loaded_matches[sport_key] = matches
+        if ODDS_API_REMAINING is not None and ODDS_API_REMAINING <= MIN_ODDS_API_REMAINING:
+            print(f"    Hinweis: API-Quota sehr niedrig ({ODDS_API_REMAINING}) – stoppe weitere Odds-Calls.")
+            break
+
+        model = football_models.get(sport_key)
+        if model is None:
+            print(f"    Kein Modell – Odds werden ignoriert")
+            continue
+
+        for match in matches:
+            bets = analyze_football_match(match, model)
+            if bets:
+                enrich_bets_with_market_data(bets, match)
+                all_football_bets.extend(bets)
+                for b in bets:
+                    b["_pred_id"] = log_prediction(run_id, b, match_raw=match)
+                    print(f"    ✓ VALUE: {b['match']} → {b['tip']} "
+                          f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
+            ou_bets_match = analyze_football_ou(match, model)
+            if ou_bets_match:
+                enrich_bets_with_market_data(ou_bets_match, match)
+                all_ou_bets.extend(ou_bets_match)
+                for b in ou_bets_match:
+                    b["_pred_id"] = log_prediction(run_id, b, match_raw=match)
+                    print(f"    ✓ O/U VALUE: {b['match']} → {b['tip']} "
+                          f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
+            btts_sigs = analyze_football_btts(match, model)
+            all_btts_signals.extend(btts_sigs)
+
+    return all_football_bets, all_ou_bets, all_btts_signals, football_models, n_training
+
+
+def run_tennis_scan(api_key: str, run_id: int) -> tuple[list, list | None]:
+    """ATP/WTA Tennis scannen. Gibt (tennis_bets, all_sports) zurück."""
+    global ODDS_API_REMAINING
+    all_tennis_bets = []
+    all_sports = None
+
+    if not TENNIS_ENABLED:
+        print("\n[🎾 Tennis] Deaktiviert (TENNIS_ENABLED=False)")
+        return all_tennis_bets, all_sports
+
+    print("\n[🎾 Tennis] ATP + WTA Elo-Ratings parallel berechnen …")
+    elo_years = get_elo_years()
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        atp_future = pool.submit(compute_tennis_elo, elo_years)
+        wta_future = pool.submit(compute_wta_elo, elo_years)
+        atp_elo_dict, atp_surface_elo, atp_training_matches = atp_future.result()
+        wta_elo_dict, wta_surface_elo, wta_training_matches = wta_future.result()
+    print(f"  ATP: {len(atp_elo_dict)} Spieler im Elo-Dict")
+    for surf, sdict in atp_surface_elo.items():
+        print(f"    {surf}: {len(sdict)} Spieler")
+    print(f"  WTA: {len(wta_elo_dict)} Spielerinnen im Elo-Dict")
+    for surf, sdict in wta_surface_elo.items():
+        print(f"    {surf}: {len(sdict)} Spielerinnen")
+
+    combined_elo = {**atp_elo_dict, **wta_elo_dict}
+    combined_tennis_training = atp_training_matches + wta_training_matches
+    combined_surface_elo = {}
+    for surf in ["Hard", "Clay", "Grass"]:
+        combined_surface_elo[surf] = {**atp_surface_elo.get(surf, {}),
+                                      **wta_surface_elo.get(surf, {})}
+
+    print("\n[🎾 Tennis] Aktive Turniere suchen …")
     try:
-        _git_hash = subprocess.check_output(
-            ["git", "-C", str(SCRIPT_DIR), "rev-parse", "--short", "HEAD"],
-            text=True, stderr=subprocess.DEVNULL,
-        ).strip()
-    except Exception:
-        _git_hash = "unknown"
-    init_db()
-    _n_training: int = 0
-    _run_id: int | None = None
+        all_sports = get_active_sports(api_key)
+        tennis_sports = [s for s in all_sports
+                         if s["key"].startswith("tennis_") and s["active"]]
+        print(f"  {len(tennis_sports)} aktive Tennis-Turniere:")
+        for s in tennis_sports:
+            print(f"    - {s['key']} ({s['title']})")
+    except Exception as e:
+        print(f"  Fehler: {e}")
+        tennis_sports = []
 
-    all_football_bets: list = []
-    all_ou_bets:       list = []
-    all_btts_signals:  list = []
-    all_tennis_bets:   list = []
-    all_uefa_bets:     list = []
-    all_sports = None  # Wird bei Bedarf von get_active_sports() befüllt
-    loaded_matches: dict = {}  # sport_key → [match, …] für Kicktipp-Wiederverwendung
+    for sport in tennis_sports:
+        sport_key = sport["key"]
+        title     = sport["title"]
+        print(f"  {title}:")
+        try:
+            matches, remaining = get_odds(api_key, sport_key, markets="h2h")
+        except Exception as e:
+            print(f"    Fehler: {e}")
+            continue
+        ODDS_API_REMAINING = remaining
+        if ODDS_API_REMAINING is not None and ODDS_API_REMAINING <= MIN_ODDS_API_REMAINING:
+            print(f"    Hinweis: API-Quota sehr niedrig ({ODDS_API_REMAINING}) – stoppe weitere Odds-Calls.")
+            break
+        for match in matches:
+            bets = analyze_tennis_match(
+                match, title, combined_elo, combined_surface_elo,
+                training_matches=combined_tennis_training,
+            )
+            if bets:
+                enrich_bets_with_market_data(bets, match)
+                all_tennis_bets.extend(bets)
+                for b in bets:
+                    b["_pred_id"] = log_prediction(run_id, b, match_raw=match)
+                    print(f"    ✓ VALUE: {b['match']} → {b['tip']} "
+                          f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
 
-    if args.dry_run:
-        print("\n[DRY-RUN] Keine externen API-Calls. Erzeuge leeren Report …")
+    return all_tennis_bets, all_sports
+
+
+def run_uefa_scan(api_key: str, run_id: int, loaded_matches: dict,
+                  all_sports: list | None = None) -> tuple[list, dict, dict | None]:
+    """UEFA/DFB-Pokal scannen. Gibt (uefa_bets, club_elo_dict, euro_model) zurück."""
+    global ODDS_API_REMAINING
+    all_uefa_bets = []
+
+    print("\n[🏆 UEFA] Club-Elo-Ratings laden …")
+    elo_date, club_elo_dict = download_clubelo_with_fallback(max_days_back=3)
+    if elo_date:
+        print(f"  {len(club_elo_dict)} Clubs im Elo-Dict (Datum: {elo_date})")
     else:
-        # ── FUSSBALL ────────────────────────────────────────────────────────
-        print("\n[⚽ Fußball] Daten laden & Modelle trainieren …")
-        football_models = {}
+        print("  Warning: Keine Club-Elo-Daten gefunden (letzte 3 Tage)")
 
-        for sport_key in FOOTBALL_SPORTS:
-            label = SPORT_LABELS.get(sport_key, sport_key)
-            print(f"  {label}:")
-            df = load_football_data(sport_key)
-            if df is None or len(df) < 20:
-                print(f"    Nicht genug Daten ({len(df) if df is not None else 0} Matches) – übersprungen")
-                continue
-            n_teams = df["HomeTeam"].nunique()
-            print(f"    {len(df)} Matches, {n_teams} Teams → trainiere Poisson …")
-            try:
-                model = fit_poisson_model(df)
-                football_models[sport_key] = model
-                _n_training += len(df)
-                print(f"    OK. Home-Vorteil={model['home_adv']:.3f}")
-            except Exception as e:
-                print(f"    Modell-Fehler: {e}")
+    print("\n[🏆 UEFA] Europäisches Poisson-Modell trainieren …")
+    euro_df = load_european_data()
+    euro_model = None
+    if euro_df is not None and len(euro_df) >= 20:
+        n_teams = euro_df["HomeTeam"].nunique()
+        print(f"  {len(euro_df)} Matches, {n_teams} Teams → trainiere Poisson …")
+        try:
+            euro_model = fit_poisson_model(euro_df)
+            print(f"  OK. Home-Vorteil={euro_model['home_adv']:.3f}")
+        except Exception as e:
+            print(f"  Modell-Fehler: {e}")
+    else:
+        print("  Nicht genug Daten für europäisches Modell")
 
-        _run_id = log_scan_run(
-            scanned_at=scan_started_at.isoformat(),
-            model_version=_git_hash,
-            training_matches=_n_training,
-        )
+    print("\n[🏆 UEFA] Matches via Odds API …")
+    for sport_key in UEFA_SPORTS:
+        label = UEFA_LABELS.get(sport_key, sport_key)
+        print(f"  {label}:")
+        try:
+            matches, remaining = get_odds(api_key, sport_key)
+        except Exception as e:
+            print(f"    Fehler: {e}")
+            continue
+        ODDS_API_REMAINING = remaining
+        loaded_matches[sport_key] = matches
+        if ODDS_API_REMAINING is not None and ODDS_API_REMAINING <= MIN_ODDS_API_REMAINING:
+            print(f"    Hinweis: API-Quota sehr niedrig ({ODDS_API_REMAINING}) – stoppe weitere Odds-Calls.")
+            break
+        for match in matches:
+            bets = analyze_uefa_match(match, club_elo_dict, euro_model)
+            if bets:
+                enrich_bets_with_market_data(bets, match)
+                all_uefa_bets.extend(bets)
+                for b in bets:
+                    b["_pred_id"] = log_prediction(run_id, b, match_raw=match)
+                    typ = b.get("type", "").upper()
+                    print(f"    ✓ UEFA VALUE [{typ}]: {b['match']} → {b['tip']} "
+                          f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
 
-        print("\n[⚽ Fußball] Upcoming Matches via Odds API …")
-        for sport_key in FOOTBALL_SPORTS:
-            label = SPORT_LABELS.get(sport_key, sport_key)
-            print(f"  {label}:")
-            try:
-                matches = get_odds(api_key, sport_key)
-            except Exception as e:
-                print(f"    Fehler: {e}")
-                continue
-            loaded_matches[sport_key] = matches  # für Kicktipp wiederverwenden
-            if ODDS_API_REMAINING is not None and ODDS_API_REMAINING <= MIN_ODDS_API_REMAINING:
-                print(f"    Hinweis: API-Quota sehr niedrig ({ODDS_API_REMAINING}) – stoppe weitere Odds-Calls.")
-                break
+    # DFB-Pokal (konditionell)
+    dfb_key = "soccer_germany_dfb_pokal"
+    try:
+        if all_sports is None:
+            all_sports = get_active_sports(api_key)
+        dfb_active = any(s["key"] == dfb_key and s["active"]
+                         for s in all_sports)
+    except Exception:
+        dfb_active = False
 
-            model = football_models.get(sport_key)
-            if model is None:
-                print(f"    Kein Modell – Odds werden ignoriert")
-                continue
-
-            for match in matches:
-                bets = analyze_football_match(match, model)
-                if bets:
-                    enrich_bets_with_market_data(bets, match)
-                    all_football_bets.extend(bets)
-                    for b in bets:
-                        b["_pred_id"] = log_prediction(_run_id, b, match_raw=match)
-                        print(f"    ✓ VALUE: {b['match']} → {b['tip']} "
-                              f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
-                ou_bets_match = analyze_football_ou(match, model)
-                if ou_bets_match:
-                    enrich_bets_with_market_data(ou_bets_match, match)
-                    all_ou_bets.extend(ou_bets_match)
-                    for b in ou_bets_match:
-                        b["_pred_id"] = log_prediction(_run_id, b, match_raw=match)
-                        print(f"    ✓ O/U VALUE: {b['match']} → {b['tip']} "
-                              f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
-                btts_sigs = analyze_football_btts(match, model)
-                all_btts_signals.extend(btts_sigs)
-
-        # ── TENNIS ──────────────────────────────────────────────────────────
-        if not TENNIS_ENABLED:
-            all_tennis_bets = []
-            print("\n[🎾 Tennis] Deaktiviert (TENNIS_ENABLED=False)")
-        else:
-            print("\n[🎾 Tennis] ATP + WTA Elo-Ratings parallel berechnen …")
-            elo_years = get_elo_years()
-            from concurrent.futures import ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                atp_future = pool.submit(compute_tennis_elo, elo_years)
-                wta_future = pool.submit(compute_wta_elo, elo_years)
-                atp_elo_dict, atp_surface_elo, atp_training_matches = atp_future.result()
-                wta_elo_dict, wta_surface_elo, wta_training_matches = wta_future.result()
-            print(f"  ATP: {len(atp_elo_dict)} Spieler im Elo-Dict")
-            for surf, sdict in atp_surface_elo.items():
-                print(f"    {surf}: {len(sdict)} Spieler")
-            print(f"  WTA: {len(wta_elo_dict)} Spielerinnen im Elo-Dict")
-            for surf, sdict in wta_surface_elo.items():
-                print(f"    {surf}: {len(sdict)} Spielerinnen")
-
-            # Kombiniertes Dict für Lookup (ATP + WTA)
-            combined_elo = {**atp_elo_dict, **wta_elo_dict}
-            combined_tennis_training = atp_training_matches + wta_training_matches
-            combined_surface_elo = {}
-            for surf in ["Hard", "Clay", "Grass"]:
-                combined_surface_elo[surf] = {**atp_surface_elo.get(surf, {}),
-                                              **wta_surface_elo.get(surf, {})}
-
-            print("\n[🎾 Tennis] Aktive Turniere suchen …")
-            try:
-                all_sports   = get_active_sports(api_key)
-                tennis_sports = [s for s in all_sports
-                                 if s["key"].startswith("tennis_") and s["active"]]
-                print(f"  {len(tennis_sports)} aktive Tennis-Turniere:")
-                for s in tennis_sports:
-                    print(f"    - {s['key']} ({s['title']})")
-            except Exception as e:
-                print(f"  Fehler: {e}")
-                tennis_sports = []
-
-            for sport in tennis_sports:
-                sport_key = sport["key"]
-                title     = sport["title"]
-                print(f"  {title}:")
-                try:
-                    matches = get_odds(api_key, sport_key, markets="h2h")
-                except Exception as e:
-                    print(f"    Fehler: {e}")
-                    continue
-                if ODDS_API_REMAINING is not None and ODDS_API_REMAINING <= MIN_ODDS_API_REMAINING:
-                    print(f"    Hinweis: API-Quota sehr niedrig ({ODDS_API_REMAINING}) – stoppe weitere Odds-Calls.")
-                    break
-                for match in matches:
-                    bets = analyze_tennis_match(
-                        match,
-                        title,
-                        combined_elo,
-                        combined_surface_elo,
-                        training_matches=combined_tennis_training,
-                    )
-                    if bets:
-                        enrich_bets_with_market_data(bets, match)
-                        all_tennis_bets.extend(bets)
-                        for b in bets:
-                            b["_pred_id"] = log_prediction(_run_id, b, match_raw=match)
-                            print(f"    ✓ VALUE: {b['match']} → {b['tip']} "
-                                  f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
-
-        # ── UEFA ────────────────────────────────────────────────────────────
-        print("\n[🏆 UEFA] Club-Elo-Ratings laden …")
-        elo_date, club_elo_dict = download_clubelo_with_fallback(max_days_back=3)
-        if elo_date:
-            print(f"  {len(club_elo_dict)} Clubs im Elo-Dict (Datum: {elo_date})")
-        else:
-            print("  Warning: Keine Club-Elo-Daten gefunden (letzte 3 Tage)")
-
-        print("\n[🏆 UEFA] Europäisches Poisson-Modell trainieren …")
-        euro_df = load_european_data()
-        euro_model = None
-        if euro_df is not None and len(euro_df) >= 20:
-            n_teams = euro_df["HomeTeam"].nunique()
-            print(f"  {len(euro_df)} Matches, {n_teams} Teams → trainiere Poisson …")
-            try:
-                euro_model = fit_poisson_model(euro_df)
-                print(f"  OK. Home-Vorteil={euro_model['home_adv']:.3f}")
-            except Exception as e:
-                print(f"  Modell-Fehler: {e}")
-        else:
-            print("  Nicht genug Daten für europäisches Modell")
-
-        print("\n[🏆 UEFA] Matches via Odds API …")
-        for sport_key in UEFA_SPORTS:
-            label = UEFA_LABELS.get(sport_key, sport_key)
-            print(f"  {label}:")
-            try:
-                matches = get_odds(api_key, sport_key)
-            except Exception as e:
-                print(f"    Fehler: {e}")
-                continue
-            loaded_matches[sport_key] = matches  # für Kicktipp wiederverwenden
-            if ODDS_API_REMAINING is not None and ODDS_API_REMAINING <= MIN_ODDS_API_REMAINING:
-                print(f"    Hinweis: API-Quota sehr niedrig ({ODDS_API_REMAINING}) – stoppe weitere Odds-Calls.")
-                break
+    if dfb_active:
+        print("\n[🏆 DFB-Pokal] Matches via Odds API …")
+        try:
+            matches, remaining = get_odds(api_key, dfb_key)
+            ODDS_API_REMAINING = remaining
             for match in matches:
                 bets = analyze_uefa_match(match, club_elo_dict, euro_model)
                 if bets:
+                    for b in bets:
+                        b["sport"] = dfb_key
                     enrich_bets_with_market_data(bets, match)
                     all_uefa_bets.extend(bets)
                     for b in bets:
-                        b["_pred_id"] = log_prediction(_run_id, b, match_raw=match)
+                        b["_pred_id"] = log_prediction(run_id, b, match_raw=match)
                         typ = b.get("type", "").upper()
-                        print(f"    ✓ UEFA VALUE [{typ}]: {b['match']} → {b['tip']} "
+                        print(f"    ✓ DFB-Pokal [{typ}]: {b['match']} → {b['tip']} "
                               f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
+        except Exception as e:
+            print(f"    Fehler: {e}")
+    else:
+        print("\n[🏆 DFB-Pokal] Keine aktive Runde – übersprungen")
 
-        # ── DFB-POKAL (konditionell) ──────────────────────────────────────
-        dfb_key = "soccer_germany_dfb_pokal"
-        try:
-            if all_sports is None:
-                all_sports = get_active_sports(api_key)
-            dfb_active = any(s["key"] == dfb_key and s["active"]
-                             for s in all_sports)
-        except Exception:
-            dfb_active = False
+    return all_uefa_bets, club_elo_dict, euro_model
 
-        if dfb_active:
-            print("\n[🏆 DFB-Pokal] Matches via Odds API …")
-            try:
-                matches = get_odds(api_key, dfb_key)
-                for match in matches:
-                    bets = analyze_uefa_match(match, club_elo_dict, euro_model)
-                    if bets:
-                        # Tag als DFB-Pokal in den Bets setzen
-                        for b in bets:
-                            b["sport"] = dfb_key
-                        enrich_bets_with_market_data(bets, match)
-                        all_uefa_bets.extend(bets)
-                        for b in bets:
-                            b["_pred_id"] = log_prediction(_run_id, b, match_raw=match)
-                            typ = b.get("type", "").upper()
-                            print(f"    ✓ DFB-Pokal [{typ}]: {b['match']} → {b['tip']} "
-                                  f"@ {b['best_odds']:.2f} | Edge {b['edge_pct']:.1f}%")
-            except Exception as e:
-                print(f"    Fehler: {e}")
-        else:
-            print("\n[🏆 DFB-Pokal] Keine aktive Runde – übersprungen")
 
-    # ── KICKTIPP ────────────────────────────────────────────────────────────
-    kicktipp_matches = []
-    if not args.dry_run:
-        print("\n[🎯 Kicktipp] Tipps sammeln (nutzt bereits geladene Matches) …")
-        kicktipp_matches = collect_kicktipp_predictions(
-            football_models, club_elo_dict, euro_model, loaded_matches
-        )
-        print(f"  → {len(kicktipp_matches)} Kicktipp-Spiele gesammelt")
+def run_kicktipp_predictions(football_models: dict, club_elo_dict: dict,
+                              euro_model: dict | None, loaded_matches: dict,
+                              out_dir: Path) -> list:
+    """Kicktipp-Tipps sammeln und speichern. Gibt kicktipp_matches zurück."""
+    print("\n[🎯 Kicktipp] Tipps sammeln (nutzt bereits geladene Matches) …")
+    kicktipp_matches = collect_kicktipp_predictions(
+        football_models, club_elo_dict, euro_model, loaded_matches
+    )
+    print(f"  → {len(kicktipp_matches)} Kicktipp-Spiele gesammelt")
 
-        if kicktipp_matches:
-            kt_html = generate_kicktipp_html(kicktipp_matches)
-            kt_html_path = out_dir / "kicktipp_report.html"
-            kt_html_path.write_text(kt_html, encoding="utf-8")
-            print(f"  HTML: {kt_html_path}")
+    if kicktipp_matches:
+        kt_html = generate_kicktipp_html(kicktipp_matches)
+        kt_html_path = out_dir / "kicktipp_report.html"
+        kt_html_path.write_text(kt_html, encoding="utf-8")
+        print(f"  HTML: {kt_html_path}")
 
-            # JSON für Dashboard
-            kt_json = []
-            for m in kicktipp_matches:
-                kt_json.append({
-                    "league":     m["league"],
-                    "home":       m["home_team"],
-                    "away":       m["away_team"],
-                    "kick_off":   m["kick_off"],
-                    "p_home":     round(m["p_home"], 4) if m["p_home"] else None,
-                    "p_draw":     round(m["p_draw"], 4) if m["p_draw"] else None,
-                    "p_away":     round(m["p_away"], 4) if m["p_away"] else None,
-                    "score_home": m["score_home"],
-                    "score_away": m["score_away"],
-                    "tendency":   m["tendency"],
-                    "model_source": m.get("model_source"),
-                })
-            kt_json_path = out_dir / "kicktipp_data.json"
-            kt_json_path.write_text(json.dumps(kt_json, ensure_ascii=False, indent=2),
-                                    encoding="utf-8")
-            print(f"  JSON: {kt_json_path}")
+        kt_json = []
+        for m in kicktipp_matches:
+            kt_json.append({
+                "league":     m["league"],
+                "home":       m["home_team"],
+                "away":       m["away_team"],
+                "kick_off":   m["kick_off"],
+                "p_home":     round(m["p_home"], 4) if m["p_home"] else None,
+                "p_draw":     round(m["p_draw"], 4) if m["p_draw"] else None,
+                "p_away":     round(m["p_away"], 4) if m["p_away"] else None,
+                "score_home": m["score_home"],
+                "score_away": m["score_away"],
+                "tendency":   m["tendency"],
+                "model_source": m.get("model_source"),
+            })
+        kt_json_path = out_dir / "kicktipp_data.json"
+        kt_json_path.write_text(json.dumps(kt_json, ensure_ascii=False, indent=2),
+                                encoding="utf-8")
+        print(f"  JSON: {kt_json_path}")
 
-    # ── BANKROLL & BET-SELEKTION ─────────────────────────────────────────────
+    return kicktipp_matches
+
+
+def run_report_and_alerts(
+    all_football_bets: list, all_ou_bets: list, all_tennis_bets: list,
+    all_uefa_bets: list, all_btts_signals: list,
+    selected_bets: list, watch_bets: list,
+    out_dir: Path, run_ref: str, scan_started_at: datetime,
+    date_str: str, run_id: int | None, dry_run: bool,
+) -> None:
+    """HTML/CSV Report generieren, Hub-Exports, Bankroll-Snapshot und Telegram-Alerts."""
     all_bets_combined = all_football_bets + all_ou_bets + all_tennis_bets + all_uefa_bets
 
-    selected_bets = []
-    watch_bets = []
-
-    if all_bets_combined and not args.dry_run:
-        print(f"\n[🎯 Wettplan] {len(all_bets_combined)} Bets bewerten & selektieren …")
-        init_bankroll()
-        selected_bets, watch_bets = select_bets(all_bets_combined)
-
-        # DB-Predictions mit Selektions-Daten aktualisieren
-        for b in selected_bets + watch_bets:
-            pred_id = b.get("_pred_id")
-            if pred_id:
-                update_prediction_selection(
-                    pred_id,
-                    confidence_score=b.get("confidence_score", 0),
-                    tier=b.get("tier", "Watch"),
-                    stake_eur=b.get("stake_eur", 0),
-                    selected=b.get("selected", 0),
-                )
-
-    # ── REPORT ──────────────────────────────────────────────────────────────
     print(f"\n[📊 Report] Football Bets: {len(all_football_bets)}")
     print(f"[📊 Report] O/U Bets:      {len(all_ou_bets)}")
     print(f"[📊 Report] Tennis Bets:   {len(all_tennis_bets)}")
@@ -2531,9 +2536,9 @@ def main() -> int:
     print(f"[⚽ BTTS] {len(all_btts_signals)} Spiele analysiert, "
           f"{btts_yes_count} mit BTTS-Signal (>= 55%)")
 
-    html      = generate_html(all_football_bets, all_ou_bets, all_tennis_bets,
-                              all_uefa_bets, selected_bets,
-                              btts_signals=all_btts_signals)
+    html = generate_html(all_football_bets, all_ou_bets, all_tennis_bets,
+                         all_uefa_bets, selected_bets,
+                         btts_signals=all_btts_signals)
     html_path = out_dir / "sports_signals.html"
     html_path.write_text(html, encoding="utf-8")
     print(f"[📊 Report] HTML: {html_path}")
@@ -2616,7 +2621,7 @@ def main() -> int:
         pd.DataFrame(rows).to_csv(csv_path, index=False)
         print(f"[📊 Report] CSV:  {csv_path}")
 
-    if not args.dry_run:
+    if not dry_run:
         hub_signals = [
             _normalize_hub_signal(bet, run_ref)
             for bet in sorted(selected_bets + watch_bets, key=lambda b: b.get("confidence_score", 0), reverse=True)
@@ -2637,26 +2642,125 @@ def main() -> int:
         print(f"[📊 Hub] JSON: {HUB_DIR / 'latest_runs.json'}")
         print(f"[📊 Hub] JSON: {HUB_DIR / 'latest_signals.json'}")
 
-    if _run_id is not None:
+    if run_id is not None:
         resolve_results()
 
-    # ── BANKROLL SNAPSHOT ─────────────────────────────────────────────────
-    if not args.dry_run:
+    # Bankroll Snapshot
+    if not dry_run:
         rebuild_all_snapshots()
         record_daily_snapshot(date_str)
 
-    # ── TELEGRAM ALERTS ───────────────────────────────────────────────────
+    # Telegram Alerts
     if all_bets_combined:
         print("\n[📱 Telegram] High-Edge Alerts …")
         send_high_edge_alerts(all_bets_combined, min_edge=10.0)
 
-    # ── TUNING ALERT (bei kritischer Performance) ─────────────────────────
-    if not args.dry_run:
+    # Tuning Alert (bei kritischer Performance)
+    if not dry_run:
         from bankroll_manager import generate_tuning_report, update_bankroll_from_results
         print("\n[📱 Telegram] Tuning-Alert …")
         tuning = generate_tuning_report()
         bk_info = update_bankroll_from_results()
         send_tuning_alert(tuning, bk_info)
+
+
+def main() -> int:
+    args = parse_args()
+    scan_started_at = datetime.now(timezone.utc).replace(microsecond=0)
+    run_ref = f"sports-{scan_started_at.isoformat()}"
+    print("=" * 60)
+    print(f"  Sports Value Scanner — {datetime.now().strftime('%d.%m.%Y %H:%M')}")
+    print("=" * 60)
+
+    creds = load_credentials()
+    api_key = creds.get("ODDS_API_KEY", "")
+    if not args.dry_run and not api_key:
+        print("ERROR: ODDS_API_KEY fehlt in ~/.stock_scanner_credentials")
+        return 1
+
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    out_dir  = OUTPUT_DIR / date_str
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── BACKTESTING ──────────────────────────────────────────────────────────
+    try:
+        _git_hash = subprocess.check_output(
+            ["git", "-C", str(SCRIPT_DIR), "rev-parse", "--short", "HEAD"],
+            text=True, stderr=subprocess.DEVNULL,
+        ).strip()
+    except Exception:
+        _git_hash = "unknown"
+    init_db()
+    _run_id: int | None = None
+
+    all_football_bets: list = []
+    all_ou_bets:       list = []
+    all_btts_signals:  list = []
+    all_tennis_bets:   list = []
+    all_uefa_bets:     list = []
+    football_models:   dict = {}
+    club_elo_dict:     dict = {}
+    euro_model = None
+    loaded_matches: dict = {}
+
+    if args.dry_run:
+        print("\n[DRY-RUN] Keine externen API-Calls. Erzeuge leeren Report …")
+    else:
+        # run_id erstellen (training_matches wird nach dem Football-Scan aktualisiert)
+        _run_id = log_scan_run(
+            scanned_at=scan_started_at.isoformat(),
+            model_version=_git_hash,
+        )
+
+        # Fußball
+        all_football_bets, all_ou_bets, all_btts_signals, football_models, _n_training = \
+            run_football_scan(api_key, _run_id, loaded_matches)
+
+        # training_matches nachträglich aktualisieren (wird erst durch run_football_scan bekannt)
+        update_scan_run_training(_run_id, _n_training)
+        # Tennis
+        all_tennis_bets, all_sports = run_tennis_scan(api_key, _run_id)
+
+        # UEFA + DFB-Pokal
+        all_uefa_bets, club_elo_dict, euro_model = run_uefa_scan(
+            api_key, _run_id, loaded_matches, all_sports
+        )
+
+    # ── KICKTIPP ──────────────────────────────────────────────────────────
+    if not args.dry_run:
+        run_kicktipp_predictions(
+            football_models, club_elo_dict, euro_model, loaded_matches, out_dir
+        )
+
+    # ── BANKROLL & BET-SELEKTION ─────────────────────────────────────────
+    all_bets_combined = all_football_bets + all_ou_bets + all_tennis_bets + all_uefa_bets
+    selected_bets = []
+    watch_bets = []
+
+    if all_bets_combined and not args.dry_run:
+        print(f"\n[🎯 Wettplan] {len(all_bets_combined)} Bets bewerten & selektieren …")
+        init_bankroll()
+        selected_bets, watch_bets = select_bets(all_bets_combined)
+
+        for b in selected_bets + watch_bets:
+            pred_id = b.get("_pred_id")
+            if pred_id:
+                update_prediction_selection(
+                    pred_id,
+                    confidence_score=b.get("confidence_score", 0),
+                    tier=b.get("tier", "Watch"),
+                    stake_eur=b.get("stake_eur", 0),
+                    selected=b.get("selected", 0),
+                )
+
+    # ── REPORT & ALERTS ──────────────────────────────────────────────────
+    run_report_and_alerts(
+        all_football_bets, all_ou_bets, all_tennis_bets,
+        all_uefa_bets, all_btts_signals,
+        selected_bets, watch_bets,
+        out_dir, run_ref, scan_started_at,
+        date_str, _run_id, args.dry_run,
+    )
 
     print("\n✓ Fertig!")
     return 0

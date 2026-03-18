@@ -337,12 +337,12 @@ def select_bets(all_bets: list, bankroll: float | None = None) -> tuple[list, li
         sport_key = bet.get("sport_key", "") or bet.get("sport", "")
         reason = None
 
-        # Hard Edge Cap: Edge > 20% → nicht prädiktiv
-        if edge > MAX_EDGE_HARD_CAP:
+        # Hard Edge Cap: Edge > Schwelle → nicht prädiktiv
+        if MAX_EDGE_HARD_CAP is not None and edge > MAX_EDGE_HARD_CAP:
             reason = f"EDGE>{MAX_EDGE_HARD_CAP:.0f}%"
 
         # Max Odds: Longshots verlieren fast immer
-        elif odds > MAX_ODDS_SELECTED:
+        elif MAX_ODDS_SELECTED is not None and odds > MAX_ODDS_SELECTED:
             reason = f"ODDS>{MAX_ODDS_SELECTED:.1f}"
 
         # Liga-spezifische Min-Edge
