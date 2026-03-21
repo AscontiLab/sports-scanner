@@ -393,47 +393,54 @@ def select_bets(all_bets: list, bankroll: float | None = None) -> tuple[list, li
     filtered = filter_correlated_bets(all_bets)
 
     # 3. Splitten: heute vs. morgen (max 48h) — keine weit entfernten Spiele
-    today_candidates = [b for b in filtered
-                        if b["tier"] != "Watch" and _is_today(b.get("kick_off", ""))]
-    later_candidates = [b for b in filtered
-                        if b["tier"] != "Watch"
-                        and not _is_today(b.get("kick_off", ""))
-                        and _is_near_future(b.get("kick_off", ""), max_days=2)]
+    playable = [b for b in filtered if b["tier"] != "Watch"
+                and (_is_today(b.get("kick_off", ""))
+                     or _is_near_future(b.get("kick_off", ""), max_days=2))]
 
-    today_candidates.sort(key=lambda b: b.get("confidence_score", 0), reverse=True)
-    later_candidates.sort(key=lambda b: b.get("confidence_score", 0), reverse=True)
+    # 3b. Separate Pools: Tennis + Fussball
+    tennis_pool = [b for b in playable if b.get("bet_type") == "tennis"]
+    football_pool = [b for b in playable if b.get("bet_type") != "tennis"]
+    tennis_pool.sort(key=lambda b: b.get("confidence_score", 0), reverse=True)
+    football_pool.sort(key=lambda b: b.get("confidence_score", 0), reverse=True)
 
-    # 4. Erst heute füllen, dann Rest mit später auffüllen
+    # 4. Selektion: Reservierter Tennis-Slot (max 2), Rest Fussball
+    TENNIS_SLOTS = 2
     selected = []
     total_risk = 0.0
     outcome_counts: dict[str, int] = {}
 
-    for bet in today_candidates + later_candidates:
-        if len(selected) >= MAX_DAILY_BETS:
-            break
-
-        # Outcome-Diversifikation: Max N gleiche Outcome-Art
+    def _try_add(bet):
+        nonlocal total_risk
         outcome_type = _outcome_type(bet)
         if outcome_counts.get(outcome_type, 0) >= MAX_SAME_OUTCOME:
-            continue
-
-        # Stake berechnen
+            return False
         stake = calculate_stake(bet.get("kelly_pct", 0), bankroll)
-
-        # Risiko-Budget prüfen
         if total_risk + stake > max_risk:
-            # Stake reduzieren um Budget einzuhalten
             remaining = max_risk - total_risk
             if remaining >= MIN_STAKE_EUR:
                 stake = round(remaining, 2)
             else:
-                continue
-
+                return False
         bet["stake_eur"] = stake
         bet["selected"] = 1
         total_risk += stake
         outcome_counts[outcome_type] = outcome_counts.get(outcome_type, 0) + 1
         selected.append(bet)
+        return True
+
+    # 4a. Tennis-Slots fuellen (max TENNIS_SLOTS)
+    tennis_added = 0
+    for bet in tennis_pool:
+        if tennis_added >= TENNIS_SLOTS or len(selected) >= MAX_DAILY_BETS:
+            break
+        if _try_add(bet):
+            tennis_added += 1
+
+    # 4b. Rest mit Fussball auffuellen
+    for bet in football_pool:
+        if len(selected) >= MAX_DAILY_BETS:
+            break
+        _try_add(bet)
 
     n_today = sum(1 for b in selected if _is_today(b.get("kick_off", "")))
 
