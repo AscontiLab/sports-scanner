@@ -152,7 +152,7 @@ KELLY_FRACTION = 0.25           # Quarter-Kelly
 MAX_DAILY_BETS = 8              # Max 8 Bets pro Tag
 MAX_DAILY_RISK_PCT = 0.15       # Max 15% der Bankroll pro Tag
 MIN_STAKE_EUR = 1.0             # Minimum-Einsatz
-MAX_SAME_OUTCOME = 3            # Max gleiche Outcome-Art (wenn O/U dominiert)
+MAX_SAME_OUTCOME = 5            # Max gleiche Outcome-Art (erhoeht von 3, da O/U oft dominiert)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # BET-SELEKTOR: CONFIDENCE SCORING
