@@ -55,21 +55,20 @@ else
     echo "Scanner fehlgeschlagen — kein E-Mail-Versand." >> "$LOG_FILE"
 fi
 
-# Resolve + Bankroll-Snapshot (auch unabhaengig vom Scanner-Exit)
-echo "Resolve Ergebnisse + Bankroll-Snapshot …" >> "$LOG_FILE"
+# Bankroll-Snapshot (Resolve passiert jetzt manuell im Dashboard)
+echo "Bankroll-Snapshot …" >> "$LOG_FILE"
 /usr/bin/python3 -c "
-from backtesting import init_db, resolve_results
+from backtesting import init_db
 from bankroll_manager import init_bankroll, rebuild_all_snapshots, record_daily_snapshot
 init_db()
 init_bankroll()
-resolve_results()
 rebuild_all_snapshots()
 record_daily_snapshot()
 " >> "$LOG_FILE" 2>&1
 if [ $? -eq 0 ]; then
-    echo "Resolve + Bankroll-Snapshot erfolgreich." >> "$LOG_FILE"
+    echo "Bankroll-Snapshot erfolgreich." >> "$LOG_FILE"
 else
-    echo "HINWEIS: Resolve/Snapshot fehlgeschlagen." >> "$LOG_FILE"
+    echo "HINWEIS: Bankroll-Snapshot fehlgeschlagen." >> "$LOG_FILE"
 fi
 
 # DB-Backup nach GitHub

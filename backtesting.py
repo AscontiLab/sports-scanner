@@ -561,6 +561,25 @@ def log_prediction(
     return prediction_id
 
 
+def reset_selection_for_date(date_str: str) -> int:
+    """Setzt alle selected-Flags fuer ein Datum zurueck (vor Neuselektion).
+
+    Nur Predictions die noch nicht manuell platziert (placed=1) wurden,
+    werden zurueckgesetzt — platzierte Bets bleiben geschuetzt.
+    """
+    with _connect() as conn:
+        cur = conn.execute(
+            """
+            UPDATE predictions SET selected = 0, stake_eur = 0
+            WHERE SUBSTR(commence_time, 1, 10) = ?
+              AND selected = 1
+              AND (placed IS NULL OR placed = 0)
+            """,
+            (date_str,),
+        )
+        return cur.rowcount
+
+
 def update_prediction_selection(
     prediction_id: int,
     confidence_score: float,
@@ -850,6 +869,71 @@ def update_result(
         "bet_won":        bet_won,
         "pnl_units":      pnl_units,
         "pnl_eur":        pnl_eur,
+        "actual_pnl_eur": actual_pnl_eur,
+    }
+
+
+def resolve_bet_simple(prediction_id: int, won: bool) -> dict:
+    """Markiert eine platzierte Bet als gewonnen oder verloren (ohne Scores).
+
+    Fuer den Free-Plan-Workflow: User klickt im Dashboard 'Gewonnen'/'Verloren'.
+    """
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM predictions WHERE id = ?", (prediction_id,)
+        ).fetchone()
+
+        if row is None:
+            raise ValueError(f"Prediction {prediction_id} nicht gefunden")
+
+        row = dict(row)
+
+        if not row.get("placed"):
+            raise ValueError(f"Prediction {prediction_id} ist nicht platziert")
+
+        if row["bet_won"] is not None:
+            raise ValueError(
+                f"Prediction {prediction_id} wurde bereits aufgeloest (bet_won={row['bet_won']})"
+            )
+
+        bet_won = 1 if won else 0
+        outcome_side = row.get("outcome_side", "")
+        actual_outcome = outcome_side if won else "opponent"
+
+        # PnL berechnen
+        stake_eur = row.get("stake_eur") or 0.0
+        best_odds = row.get("best_odds") or 0.0
+        pnl_units = ((best_odds - 1.0) * row.get("stake_units", 1.0)) if won else -(row.get("stake_units", 1.0))
+
+        pnl_eur = None
+        if stake_eur and stake_eur > 0:
+            pnl_eur = round((best_odds - 1.0) * stake_eur, 2) if won else round(-stake_eur, 2)
+
+        actual_pnl_eur = None
+        actual_stake = row.get("actual_stake_eur")
+        if actual_stake and actual_stake > 0:
+            actual_pnl_eur = round((best_odds - 1.0) * actual_stake, 2) if won else round(-actual_stake, 2)
+
+        fetched_at = datetime.now(timezone.utc).isoformat()
+
+        conn.execute(
+            """
+            UPDATE predictions SET
+                result_fetched_at = ?,
+                actual_outcome    = ?,
+                bet_won           = ?,
+                pnl_units         = ?,
+                pnl_eur           = ?,
+                actual_pnl_eur    = ?
+            WHERE id = ?
+            """,
+            (fetched_at, actual_outcome, bet_won, pnl_units, pnl_eur, actual_pnl_eur, prediction_id),
+        )
+
+    return {
+        "prediction_id": prediction_id,
+        "bet_won": bet_won,
+        "pnl_eur": pnl_eur,
         "actual_pnl_eur": actual_pnl_eur,
     }
 
