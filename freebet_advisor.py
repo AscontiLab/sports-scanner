@@ -198,6 +198,92 @@ def _freebet_reason(model_prob, odds, ev, amount):
     return " · ".join(parts) if parts else "Positiver Expected Value"
 
 
+def find_qualifying_combos(target_odds: float, sport: str = None,
+                            max_legs: int = 3, max_results: int = 5) -> list[dict]:
+    """
+    KOMBI-MODUS: Finde 2-3er Kombiwetten die zusammen >= target_odds ergeben.
+
+    Strategie: Kombiniere 2-3 sehr sichere Einzelwetten (hohe model_prob)
+    deren Quoten multipliziert die Mindestquote erreichen.
+    z.B. 1.40 x 1.50 = 2.10 >= 2.0
+
+    Vorteil: Jede Einzelwette hat hohe Gewinnchance,
+    Gesamtchance ist Produkt der Einzelwahrscheinlichkeiten.
+    """
+    from itertools import combinations
+
+    bets = _get_upcoming_bets(sport)
+
+    # Nur Bets mit hoher Sicherheit und positvem Edge
+    safe_bets = [b for b in bets
+                 if b["model_prob"] >= 0.45
+                 and b["edge_pct"] >= 2.0
+                 and 1.20 <= b["best_odds"] <= 2.50]
+
+    # Deduplizieren: max 1 Bet pro Spiel
+    seen_matches = {}
+    for b in safe_bets:
+        match_key = f"{b['home_team']}_{b['away_team']}"
+        if match_key not in seen_matches or b["model_prob"] > seen_matches[match_key]["model_prob"]:
+            seen_matches[match_key] = b
+    safe_bets = list(seen_matches.values())
+
+    # Sortiere nach Sicherheit
+    safe_bets.sort(key=lambda x: x["model_prob"], reverse=True)
+    # Maximal 15 kandidaten um Kombinatorik zu begrenzen
+    safe_bets = safe_bets[:15]
+
+    combos = []
+
+    # 2er-Kombis
+    for a, b in combinations(safe_bets, 2):
+        combo_odds = a["best_odds"] * b["best_odds"]
+        if combo_odds >= target_odds:
+            combo_prob = a["model_prob"] * b["model_prob"]
+            combos.append(_build_combo([a, b], combo_odds, combo_prob, target_odds))
+
+    # 3er-Kombis (nur wenn max_legs >= 3)
+    if max_legs >= 3:
+        for a, b, c in combinations(safe_bets, 3):
+            combo_odds = a["best_odds"] * b["best_odds"] * c["best_odds"]
+            if combo_odds >= target_odds:
+                combo_prob = a["model_prob"] * b["model_prob"] * c["model_prob"]
+                combos.append(_build_combo([a, b, c], combo_odds, combo_prob, target_odds))
+
+    # Sortiere nach hoechster Kombi-Wahrscheinlichkeit
+    combos.sort(key=lambda x: x["combo_prob"], reverse=True)
+    return combos[:max_results]
+
+
+def _build_combo(legs: list[dict], combo_odds: float, combo_prob: float,
+                  target_odds: float) -> dict:
+    """Baut ein Kombi-Ergebnis-Dict."""
+    leg_details = []
+    for b in legs:
+        leg_details.append({
+            "match": f"{b['home_team']} vs {b['away_team']}",
+            "tip": b["tip"],
+            "odds": round(b["best_odds"], 2),
+            "model_prob": round(b["model_prob"] * 100, 1),
+            "edge_pct": round(b["edge_pct"], 1),
+            "league": b.get("sport_key", "?"),
+            "kickoff": b["commence_time"],
+        })
+
+    return {
+        "legs": leg_details,
+        "num_legs": len(legs),
+        "combo_odds": round(combo_odds, 2),
+        "combo_prob": round(combo_prob * 100, 1),
+        "target_odds": target_odds,
+        "odds_surplus": round(combo_odds - target_odds, 2),
+        "mode": "qualifying_combo",
+        "reason": (f"{len(legs)}er-Kombi: {' × '.join(f'{l['odds']:.2f}' for l in leg_details)}"
+                   f" = {combo_odds:.2f} (>= {target_odds:.2f})"
+                   f" | Gesamtchance: {combo_prob*100:.0f}%"),
+    }
+
+
 def format_text(results: list[dict], mode: str) -> str:
     """CLI/Text-Ausgabe."""
     if not results:
