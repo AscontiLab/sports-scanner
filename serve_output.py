@@ -109,6 +109,7 @@ def _sports_bets_payload(date_str: str | None = None):
 
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
+        # Nur die neueste Prediction pro Spiel+Tipp anzeigen (verhindert Duplikate)
         rows = conn.execute(
             """
             SELECT
@@ -118,9 +119,17 @@ def _sports_bets_payload(date_str: str | None = None):
             FROM predictions
             WHERE selected = 1
               AND SUBSTR(commence_time, 1, 10) = ?
+              AND id = (
+                  SELECT MAX(p2.id) FROM predictions p2
+                  WHERE p2.selected = 1
+                    AND p2.home_team = predictions.home_team
+                    AND p2.away_team = predictions.away_team
+                    AND p2.tip = predictions.tip
+                    AND SUBSTR(p2.commence_time, 1, 10) = ?
+              )
             ORDER BY commence_time ASC, confidence_score DESC, id DESC
             """,
-            (date_str,),
+            (date_str, date_str),
         ).fetchall()
 
     recommended = []
@@ -348,6 +357,18 @@ class OutputHandler(SimpleHTTPRequestHandler):
         if path == "/api/sports-bets":
             date_str = qs.get("date", [""])[0] or None
             self._json_response(_sports_bets_payload(date_str))
+            return True
+
+        # --- /api/freebet?mode=qualifying&min_odds=2.0 ---
+        # --- /api/freebet?mode=freebet&amount=5&min_odds=2.5&max_odds=6.0 ---
+        if path == "/api/freebet":
+            try:
+                from freebet_advisor import handle_api_request
+                params = {k: v[0] for k, v in qs.items()}
+                result = handle_api_request(params)
+                self._json_response(result)
+            except Exception as e:
+                self._json_response({"error": str(e)}, status=500)
             return True
 
         return False

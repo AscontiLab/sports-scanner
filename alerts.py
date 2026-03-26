@@ -67,6 +67,34 @@ def send_high_edge_alerts(all_bets: list, min_edge: float = 10.0) -> int:
     return 0
 
 
+def send_freebet_advice(mode: str, params: dict) -> bool:
+    """
+    Sendet Freebet-Vorschlaege via Telegram.
+    mode: 'qualifying' oder 'freebet'
+    params: min_odds, amount, sport, etc.
+    """
+    from freebet_advisor import handle_api_request, format_telegram
+
+    bot_token, chat_id = load_telegram_creds()
+    if not bot_token or not chat_id:
+        print("    Telegram nicht konfiguriert")
+        return False
+
+    params["mode"] = mode
+    result = handle_api_request(params)
+
+    if result.get("error"):
+        send_telegram(f"Fehler: {result['error']}", bot_token, chat_id)
+        return False
+
+    if result["count"] == 0:
+        send_telegram("Keine passenden Vorschlaege gefunden.", bot_token, chat_id)
+        return True
+
+    msg = result["telegram"]
+    return send_telegram(msg, bot_token, chat_id)
+
+
 def send_tuning_alert(tuning_report: dict, bankroll_info: dict) -> bool:
     """
     Sendet Telegram-Alert wenn Tuning-Report kritisch ist.
