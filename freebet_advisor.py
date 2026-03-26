@@ -45,6 +45,13 @@ def _get_upcoming_bets(sport_filter: str = None, lookback_days: int = 2) -> list
 
     if sport_filter:
         sf = sport_filter.lower()
+        INTERNATIONAL_KEYS = {
+            "soccer_fifa_world_cup", "soccer_fifa_world_cup_qualifiers_europe",
+            "soccer_uefa_nations_league", "soccer_uefa_euro",
+            "soccer_fifa_world_cup_qualifiers_africa",
+            "soccer_fifa_world_cup_qualifiers_asia",
+            "soccer_fifa_world_cup_qualifiers_south_america",
+        }
         filtered = []
         for b in bets:
             sk = (b.get("sport_key") or "").lower()
@@ -52,6 +59,9 @@ def _get_upcoming_bets(sport_filter: str = None, lookback_days: int = 2) -> list
                 filtered.append(b)
             elif sf == "tennis" and "tennis" in sk:
                 filtered.append(b)
+            elif sf in ("international", "laenderspiele"):
+                if sk in INTERNATIONAL_KEYS:
+                    filtered.append(b)
             elif sf in sk:
                 filtered.append(b)
         bets = filtered
@@ -331,6 +341,84 @@ def format_telegram(results: list[dict], mode: str) -> str:
     return "\n".join(lines)
 
 
+def recalc_ev(match_query: str, actual_odds: float, freebet_amount: float = 0) -> dict:
+    """
+    EV-Rechner mit eigener Quote (z.B. Winamax-Quote statt Scanner-Quote).
+
+    match_query: Suchbegriff (Teamname, z.B. "Malta")
+    actual_odds: Die echte Quote bei deinem Bookie
+    freebet_amount: Wenn > 0, berechne Freebet-EV (nur Gewinn, kein Einsatz zurueck)
+    """
+    bets = _get_upcoming_bets()
+
+    # Suche nach Match
+    query = match_query.lower()
+    matches = []
+    for b in bets:
+        searchable = f"{b['home_team']} {b['away_team']} {b['tip']}".lower()
+        if query in searchable:
+            matches.append(b)
+
+    if not matches:
+        return {"error": f"Kein Match gefunden fuer '{match_query}'", "results": []}
+
+    results = []
+    for b in matches:
+        model_prob = b["model_prob"]
+        # Normaler EV: model_prob * odds - 1
+        edge = model_prob * actual_odds - 1.0
+        edge_pct = edge * 100
+
+        if freebet_amount > 0:
+            # Freebet: nur Gewinn (kein Einsatz zurueck)
+            ev_eur = model_prob * (actual_odds - 1) * freebet_amount
+            freebet_roi = model_prob * (actual_odds - 1) * 100
+        else:
+            ev_eur = None
+            freebet_roi = None
+
+        results.append({
+            "match": f"{b['home_team']} vs {b['away_team']}",
+            "league": b.get("sport_key", "?"),
+            "kickoff": b["commence_time"],
+            "tip": b["tip"],
+            "scanner_odds": round(b["best_odds"], 2),
+            "scanner_bookie": b.get("best_odds_bookie", "?"),
+            "your_odds": round(actual_odds, 2),
+            "model_prob": round(model_prob * 100, 1),
+            "edge_pct": round(edge_pct, 1),
+            "has_value": edge_pct > 0,
+            "expected_profit": round(ev_eur, 2) if ev_eur is not None else None,
+            "freebet_roi": round(freebet_roi, 1) if freebet_roi is not None else None,
+            "verdict": _ev_verdict(edge_pct, freebet_roi),
+        })
+
+    results.sort(key=lambda x: x["edge_pct"], reverse=True)
+    return {"mode": "ev-check", "count": len(results), "results": results}
+
+
+def _ev_verdict(edge_pct: float, freebet_roi: float = None) -> str:
+    """Einfache Bewertung."""
+    if freebet_roi is not None:
+        if freebet_roi > 80:
+            return "Sehr guter Freebet-Einsatz"
+        elif freebet_roi > 50:
+            return "Solider Freebet-Einsatz"
+        elif freebet_roi > 0:
+            return "OK, aber es gibt vermutlich Besseres"
+        else:
+            return "Kein Value — Finger weg"
+    else:
+        if edge_pct > 10:
+            return "Starker Value"
+        elif edge_pct > 3:
+            return "Guter Value"
+        elif edge_pct > 0:
+            return "Minimaler Value"
+        else:
+            return "Kein Value bei dieser Quote"
+
+
 # --- API-Funktionen (fuer serve_output.py und n8n) ---
 
 def handle_api_request(params: dict) -> dict:
@@ -359,6 +447,12 @@ def handle_api_request(params: dict) -> dict:
             max_odds=float(params.get("max_odds", 6.0)),
             sport=params.get("sport"),
             max_results=int(params.get("max_results", 5)),
+        )
+    elif mode == "ev-check":
+        return recalc_ev(
+            match_query=params.get("match", ""),
+            actual_odds=float(params.get("odds", 2.0)),
+            freebet_amount=float(params.get("amount", 0)),
         )
     else:
         return {"error": f"Unbekannter Modus: {mode}"}
