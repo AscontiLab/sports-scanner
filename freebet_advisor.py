@@ -46,7 +46,7 @@ def _get_upcoming_bets(sport_filter: str = None, lookback_days: int = 2) -> list
     if sport_filter:
         sf = sport_filter.lower()
         INTERNATIONAL_KEYS = {
-            "soccer_fifa_world_cup", "soccer_fifa_world_cup_qualifiers_europe",
+            "soccer_fifa_world_cup_qualifiers_europe",
             "soccer_uefa_nations_league", "soccer_uefa_euro",
             "soccer_fifa_world_cup_qualifiers_africa",
             "soccer_fifa_world_cup_qualifiers_asia",
