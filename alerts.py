@@ -3,37 +3,38 @@
 Telegram-Alerts für High-Edge-Bets.
 Sendet Bets mit Edge > 10% via Telegram Bot.
 
+Nutzt scanner_common.telegram fuer den eigentlichen Versand.
+
 Credentials in ~/.stock_scanner_credentials:
   TELEGRAM_BOT_TOKEN=...
   TELEGRAM_CHAT_ID=...
 """
 
-import requests
+# --- Neue zentrale Imports aus scanner_common ---
+from scanner_common.telegram import send_message as _send_message_common
+from scanner_common.credentials import load_credentials
 
-from config import load_credentials
+# Abwaertskompatibilitaet: config.load_credentials bleibt als Fallback
+# from config import load_credentials
 
 
 def load_telegram_creds() -> tuple[str, str]:
-    """Gibt (bot_token, chat_id) zurück."""
+    """Gibt (bot_token, chat_id) zurueck. Primaer AscontiLab Bot, Fallback alter Token."""
     creds = load_credentials()
-    return creds.get("TELEGRAM_BOT_TOKEN", ""), creds.get("TELEGRAM_CHAT_ID", "")
+    token = creds.get("ASCONTILAB_BOT_TOKEN", "") or creds.get("TELEGRAM_BOT_TOKEN", "")
+    chat_id = creds.get("ASCONTILAB_CHAT_ID", "") or creds.get("TELEGRAM_CHAT_ID", "")
+    return token, chat_id
 
 
 def send_telegram(message: str, bot_token: str, chat_id: str) -> bool:
-    """Sendet eine Nachricht via Telegram Bot API."""
-    if not bot_token or not chat_id:
-        return False
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    try:
-        r = requests.post(url, json={
-            "chat_id": chat_id,
-            "text": message,
-            "parse_mode": "HTML",
-        }, timeout=10)
-        return r.status_code == 200
-    except Exception as e:
-        print(f"    Telegram-Fehler: {e}")
-        return False
+    """
+    Sendet eine Nachricht via Telegram Bot API.
+
+    DEPRECATED: Nutze scanner_common.telegram.send_message() direkt.
+    Bleibt fuer Abwaertskompatibilitaet (wird intern von Scanner-spezifischen
+    Funktionen aufgerufen).
+    """
+    return _send_message_common(message, bot_token, chat_id)
 
 
 def send_high_edge_alerts(all_bets: list, min_edge: float = 10.0) -> int:
