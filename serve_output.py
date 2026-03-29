@@ -118,18 +118,18 @@ def _sports_bets_payload(date_str: str | None = None):
                 confidence_score, placed, placed_at, bet_won, actual_pnl_eur
             FROM predictions
             WHERE selected = 1
-              AND SUBSTR(commence_time, 1, 10) = ?
+              AND commence_time >= ? AND commence_time < date(?, '+1 day')
               AND id = (
                   SELECT MAX(p2.id) FROM predictions p2
                   WHERE p2.selected = 1
                     AND p2.home_team = predictions.home_team
                     AND p2.away_team = predictions.away_team
                     AND p2.tip = predictions.tip
-                    AND SUBSTR(p2.commence_time, 1, 10) = ?
+                    AND p2.commence_time >= ? AND p2.commence_time < date(?, '+1 day')
               )
             ORDER BY commence_time ASC, confidence_score DESC, id DESC
             """,
-            (date_str, date_str),
+            (date_str, date_str, date_str, date_str),
         ).fetchall()
 
     recommended = []
@@ -162,8 +162,15 @@ def _sports_bets_payload(date_str: str | None = None):
 
 class OutputHandler(SimpleHTTPRequestHandler):
 
+    # Erlaubte Origins für CORS (Docker-Netz + lokaler Zugriff)
+    _ALLOWED_ORIGINS = {"http://172.28.0.1", "http://localhost", "http://127.0.0.1"}
+
     def _send_cors_headers(self):
-        self.send_header("Access-Control-Allow-Origin", "*")
+        origin = self.headers.get("Origin", "")
+        if origin in self._ALLOWED_ORIGINS:
+            self.send_header("Access-Control-Allow-Origin", origin)
+        else:
+            self.send_header("Access-Control-Allow-Origin", "http://localhost")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
@@ -171,7 +178,12 @@ class OutputHandler(SimpleHTTPRequestHandler):
         """Prüft Bearer-Token für GET /api/* Endpoints.
         Gibt True zurück wenn Zugriff erlaubt, False wenn abgelehnt (Response bereits gesendet)."""
         if _SPORTS_API_TOKEN is None:
-            return True  # kein Token konfiguriert → abwärtskompatibel
+            self.send_response(503)
+            self.send_header("Content-Type", "application/json")
+            self._send_cors_headers()
+            self.end_headers()
+            self.wfile.write(b'{"error": "Server nicht konfiguriert: SPORTS_API_TOKEN fehlt"}')
+            return False
         auth_header = self.headers.get("Authorization", "")
         if hmac.compare_digest(auth_header, f"Bearer {_SPORTS_API_TOKEN}"):
             return True
