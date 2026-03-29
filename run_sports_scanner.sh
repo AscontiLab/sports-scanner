@@ -71,6 +71,17 @@ else
     echo "HINWEIS: Bankroll-Snapshot fehlgeschlagen." >> "$LOG_FILE"
 fi
 
+# Sonntags: Alte Odds-Snapshots aufräumen (Retention Policy)
+if [ "$(date +%u)" -eq 7 ]; then
+    echo "Odds-Cleanup (Retention Policy) …" >> "$LOG_FILE"
+    /usr/bin/python3 "$SCRIPT_DIR/backtesting.py" cleanup >> "$LOG_FILE" 2>&1
+    if [ $? -eq 0 ]; then
+        echo "Odds-Cleanup erfolgreich." >> "$LOG_FILE"
+    else
+        echo "HINWEIS: Odds-Cleanup fehlgeschlagen." >> "$LOG_FILE"
+    fi
+fi
+
 # DB-Backup nach GitHub
 echo "DB-Backup …" >> "$LOG_FILE"
 bash "$SCRIPT_DIR/backup_db.sh" >> "$LOG_FILE" 2>&1

@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """
 Sendet den täglichen Kicktipp-Report per E-Mail (Gmail SMTP).
+
+Nutzt scanner_common fuer Credentials und E-Mail-Versand.
 """
 
 import re
 import sys
-import smtplib
 from datetime import datetime
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from pathlib import Path
 
-from config import load_credentials
+# --- Neue zentrale Imports aus scanner_common ---
+from scanner_common import load_credentials
+from scanner_common import send_report as _send_report_generic
+
+# Abwaertskompatibilitaet: config.load_credentials bleibt als Fallback
+# from config import load_credentials
 
 
 def build_subject(html_path: Path) -> str:
@@ -26,32 +30,16 @@ def build_subject(html_path: Path) -> str:
 
 
 def send_report(html_path: Path):
-    creds = load_credentials()
-    required_keys = ["GMAIL_USER", "GMAIL_APP_PASSWORD", "GMAIL_RECIPIENT"]
-    missing = [k for k in required_keys if not creds.get(k)]
-    if missing:
-        print(f"Fehler: Fehlende Credentials: {', '.join(missing)}", file=sys.stderr)
-        print("Bitte in ~/.stock_scanner_credentials eintragen.", file=sys.stderr)
+    """Sendet den Kicktipp-Report via scanner_common."""
+    subject = build_subject(html_path)
+    html_content = html_path.read_text(encoding="utf-8")
+
+    if not _send_report_generic(
+        subject=subject,
+        html_body=html_content,
+        sender_name="Sports Scanner",
+    ):
         sys.exit(1)
-    user      = creds["GMAIL_USER"]
-    password  = creds["GMAIL_APP_PASSWORD"]
-    recipient = creds["GMAIL_RECIPIENT"]
-    subject   = build_subject(html_path)
-
-    msg            = MIMEMultipart("mixed")
-    msg["From"]    = f"Sports Scanner <{user}>"
-    msg["To"]      = recipient
-    msg["Subject"] = subject
-
-    msg.attach(MIMEText(html_path.read_text(encoding="utf-8"), "html", "utf-8"))
-
-    with smtplib.SMTP("smtp.gmail.com", 587) as server:
-        server.ehlo()
-        server.starttls()
-        server.login(user, password)
-        server.sendmail(user, recipient, msg.as_string())
-
-    print(f"E-Mail gesendet an {recipient}: {subject}")
 
 
 if __name__ == "__main__":

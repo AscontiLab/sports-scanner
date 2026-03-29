@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS bankroll_config (
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(_DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
@@ -163,10 +165,10 @@ def record_daily_snapshot(
                 SUM(CASE WHEN bet_won = 1 THEN 1 ELSE 0 END) AS bets_won
             FROM predictions
             WHERE placed = 1
-              AND SUBSTR(commence_time, 1, 10) = ?
+              AND commence_time >= ? AND commence_time < date(?, '+1 day')
               AND bet_won IS NOT NULL
             """,
-            (date_str,),
+            (date_str, date_str),
         ).fetchone()
 
         day_pnl = float(stats["day_pnl"]) if stats["day_pnl"] else 0.0
@@ -244,10 +246,10 @@ def rebuild_all_snapshots() -> None:
                     SUM(CASE WHEN bet_won = 1 THEN 1 ELSE 0 END) AS bets_won
                 FROM predictions
                 WHERE placed = 1
-                  AND SUBSTR(commence_time, 1, 10) = ?
+                  AND commence_time >= ? AND commence_time < date(?, '+1 day')
                   AND bet_won IS NOT NULL
                 """,
-                (day,),
+                (day, day),
             ).fetchone()
 
             day_pnl = float(stats["day_pnl"]) if stats["day_pnl"] else 0.0

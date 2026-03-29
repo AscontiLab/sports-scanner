@@ -88,6 +88,22 @@ UEFA_LABELS = {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# LÄNDERSPIELE (Nationalmannschaften)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+INTERNATIONAL_SPORTS = [
+    "soccer_fifa_world_cup_qualifiers_europe",
+    "soccer_uefa_nations_league",
+    "soccer_fifa_world_cup",
+]
+
+INTERNATIONAL_LABELS = {
+    "soccer_fifa_world_cup_qualifiers_europe": "WM-Quali Europa",
+    "soccer_uefa_nations_league":              "Nations League",
+    "soccer_fifa_world_cup":                   "FIFA WM",
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # CLUB-ELO
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -121,10 +137,7 @@ MIN_ODDS_API_REMAINING = 5
 KICKTIPP_FOOTBALL_SPORTS = [
     "soccer_germany_bundesliga",
     "soccer_germany_bundesliga2",
-    "soccer_epl",
-    "soccer_spain_la_liga",
-    "soccer_italy_serie_a",
-    "soccer_france_ligue_one",
+    "soccer_germany_liga3",
 ]
 
 KICKTIPP_UEFA_SPORTS = [
@@ -132,15 +145,21 @@ KICKTIPP_UEFA_SPORTS = [
     "soccer_uefa_europa_league",
 ]
 
+KICKTIPP_INTERNATIONAL_SPORTS = [
+    "soccer_fifa_world_cup_qualifiers_europe",
+    "soccer_uefa_nations_league",
+    "soccer_fifa_world_cup",
+]
+
 KICKTIPP_LABELS = {
-    "soccer_germany_bundesliga":  "1. Bundesliga",
-    "soccer_germany_bundesliga2": "2. Bundesliga",
-    "soccer_epl":                 "Premier League",
-    "soccer_spain_la_liga":       "La Liga",
-    "soccer_italy_serie_a":       "Serie A",
-    "soccer_france_ligue_one":    "Ligue 1",
-    "soccer_uefa_champs_league":  "Champions League",
-    "soccer_uefa_europa_league":  "Europa League",
+    "soccer_germany_bundesliga":               "1. Bundesliga",
+    "soccer_germany_bundesliga2":              "2. Bundesliga",
+    "soccer_germany_liga3":                    "3. Liga",
+    "soccer_uefa_champs_league":               "Champions League",
+    "soccer_uefa_europa_league":               "Europa League",
+    "soccer_fifa_world_cup_qualifiers_europe":  "WM-Quali Europa",
+    "soccer_uefa_nations_league":               "Nations League",
+    "soccer_fifa_world_cup":                    "FIFA WM",
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -208,7 +227,7 @@ TENNIS_ENABLED = True
 # KOMBINIERTE LABELS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-ALL_LABELS = {**SPORT_LABELS, **UEFA_LABELS}
+ALL_LABELS = {**SPORT_LABELS, **UEFA_LABELS, **INTERNATIONAL_LABELS}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -216,7 +235,20 @@ ALL_LABELS = {**SPORT_LABELS, **UEFA_LABELS}
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def load_credentials(path: Path | None = None) -> dict:
-    """Liest KEY=VALUE Credentials aus einer Datei (Standard: ~/.stock_scanner_credentials)."""
+    """
+    Liest KEY=VALUE Credentials aus einer Datei (Standard: ~/.stock_scanner_credentials).
+
+    DEPRECATED: Bitte scanner_common.load_credentials() direkt nutzen.
+    Diese Funktion bleibt fuer Abwaertskompatibilitaet erhalten.
+    """
+    # Delegiert an scanner_common fuer einheitliche Implementierung
+    try:
+        from scanner_common.credentials import load_credentials as _sc_load
+        return _sc_load(path or CREDS_FILE)
+    except ImportError:
+        # Fallback: lokale Implementierung falls scanner_common nicht verfuegbar
+        pass
+
     cred_file = path or CREDS_FILE
     if not cred_file.exists():
         print(f"Fehler: Credentials-Datei fehlt: {cred_file}", file=sys.stderr)

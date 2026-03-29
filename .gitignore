@@ -10,3 +10,6 @@ __pycache__/
 # Backup-Dumps explizit tracken
 !backup/
 !backup/*.sql
+.env
+cache/
+sports_backtesting.db.bak
