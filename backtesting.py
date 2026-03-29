@@ -107,7 +107,12 @@ CREATE TABLE IF NOT EXISTS predictions (
     placed            INTEGER DEFAULT 0,  -- 1 = tatsaechlich gespielt
     placed_at         TEXT,               -- ISO-Zeitpunkt der Platzierung
     actual_stake_eur  REAL,               -- tatsaechlicher Einsatz
-    actual_pnl_eur    REAL                -- tatsaechlicher Profit/Loss
+    actual_pnl_eur    REAL,               -- tatsaechlicher Profit/Loss
+
+    -- Operator-Review
+    operator_status   TEXT,               -- "recommended" | "watch" | "rejected"
+    operator_note     TEXT,
+    operator_updated_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS odds_snapshot (
@@ -133,6 +138,8 @@ CREATE INDEX IF NOT EXISTS idx_odds_prediction     ON odds_snapshot(prediction_i
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
@@ -348,6 +355,9 @@ def _migrate_wettplan_columns(conn: sqlite3.Connection) -> None:
         ("placed_at",        "TEXT"),
         ("actual_stake_eur", "REAL"),
         ("actual_pnl_eur",   "REAL"),
+        ("operator_status",  "TEXT"),
+        ("operator_note",    "TEXT"),
+        ("operator_updated_at", "TEXT"),
     ]
     for col_name, col_type in migrations:
         if col_name not in existing:
@@ -571,11 +581,11 @@ def reset_selection_for_date(date_str: str) -> int:
         cur = conn.execute(
             """
             UPDATE predictions SET selected = 0, stake_eur = 0
-            WHERE SUBSTR(commence_time, 1, 10) = ?
+            WHERE commence_time >= ? AND commence_time < date(?, '+1 day')
               AND selected = 1
               AND (placed IS NULL OR placed = 0)
             """,
-            (date_str,),
+            (date_str, date_str),
         )
         return cur.rowcount
 
@@ -683,13 +693,14 @@ def get_recommended_predictions(date_str: str | None = None) -> list[dict]:
             SELECT
                 id, sport_key, bet_type, home_team, away_team, commence_time,
                 tip, best_odds, edge_pct, stake_eur, actual_stake_eur, tier,
-                confidence_score, placed, placed_at, bet_won, pnl_eur, actual_pnl_eur
+                confidence_score, placed, placed_at, bet_won, pnl_eur, actual_pnl_eur,
+                operator_status, operator_note, operator_updated_at
             FROM predictions
             WHERE selected = 1
-              AND SUBSTR(commence_time, 1, 10) = ?
+              AND commence_time >= ? AND commence_time < date(?, '+1 day')
             ORDER BY commence_time ASC, confidence_score DESC, id DESC
             """,
-            (date_str,),
+            (date_str, date_str),
         ).fetchall()
 
     return [dict(r) for r in rows]
@@ -1381,6 +1392,70 @@ def _print_table(headers: list[str], rows: list[list[str]], indent: int = 2) -> 
         print(prefix + "  ".join(str(cell).ljust(widths[i]) for i, cell in enumerate(row)))
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# RETENTION / CLEANUP
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def cleanup_old_odds(days: int = 90, dry_run: bool = False) -> dict:
+    """Löscht odds_snapshot Einträge für resolved Predictions älter als X Tage.
+    Behält Odds für offene/unresolved Predictions."""
+    conn = _connect()
+    try:
+        # Zähle betroffene Einträge
+        count_sql = """
+            SELECT COUNT(*) FROM odds_snapshot
+            WHERE prediction_id IN (
+                SELECT id FROM predictions
+                WHERE bet_won IS NOT NULL
+                  AND result_fetched_at < datetime('now', ?)
+            )
+        """
+        threshold = f"-{days} days"
+        row = conn.execute(count_sql, (threshold,)).fetchone()
+        deletable = row[0]
+
+        # DB-Größe vorher
+        db_size_before = Path(DB_PATH).stat().st_size
+
+        if dry_run:
+            print(f"[DRY-RUN] {deletable} Odds-Einträge würden gelöscht "
+                  f"(resolved Predictions älter als {days} Tage)")
+            print(f"DB-Größe aktuell: {db_size_before / 1024 / 1024:.1f} MB")
+            return {"deleted": 0, "deletable": deletable, "dry_run": True}
+
+        if deletable == 0:
+            print(f"Keine Odds-Einträge zum Löschen (resolved Predictions älter als {days} Tage).")
+            return {"deleted": 0, "deletable": 0, "dry_run": False}
+
+        # Lösche die Einträge
+        delete_sql = """
+            DELETE FROM odds_snapshot
+            WHERE prediction_id IN (
+                SELECT id FROM predictions
+                WHERE bet_won IS NOT NULL
+                  AND result_fetched_at < datetime('now', ?)
+            )
+        """
+        cursor = conn.execute(delete_sql, (threshold,))
+        deleted = cursor.rowcount
+        conn.commit()
+
+        # VACUUM gibt Speicherplatz frei
+        conn.execute("VACUUM")
+
+        db_size_after = Path(DB_PATH).stat().st_size
+        saved_mb = (db_size_before - db_size_after) / 1024 / 1024
+
+        print(f"{deleted} Odds-Einträge gelöscht (resolved Predictions älter als {days} Tage)")
+        print(f"DB-Größe: {db_size_before / 1024 / 1024:.1f} MB → "
+              f"{db_size_after / 1024 / 1024:.1f} MB (−{saved_mb:.1f} MB)")
+
+        return {"deleted": deleted, "deletable": deletable, "dry_run": False,
+                "size_before": db_size_before, "size_after": db_size_after}
+    finally:
+        conn.close()
+
+
 if __name__ == "__main__":
     import sys
 
@@ -1594,9 +1669,22 @@ if __name__ == "__main__":
         result = resolve_results()
         print(f"Resolved: {result['resolved']} | Still open: {result['still_open']} | Stale: {result.get('stale', 0)}")
 
+    elif cmd == "cleanup":
+        # Retention Policy: alte Odds-Snapshots für resolved Predictions löschen
+        dry_run = "--dry-run" in sys.argv
+        days = 90
+        for arg in sys.argv[2:]:
+            if arg.startswith("--days="):
+                try:
+                    days = int(arg.split("=", 1)[1])
+                except ValueError:
+                    print(f"Ungültiger Wert für --days: {arg}")
+                    sys.exit(1)
+        cleanup_old_odds(days=days, dry_run=dry_run)
+
     else:
         print(f"Unbekannter Befehl: {cmd}")
-        print("Verwendung: python3 backtesting.py [summary|open|resolve|stale|manual|void]")
+        print("Verwendung: python3 backtesting.py [summary|open|resolve|stale|manual|void|cleanup]")
         print()
         print("  summary                        — Gesamtauswertung")
         print("  open                           — Offene Predictions anzeigen")
@@ -1604,4 +1692,5 @@ if __name__ == "__main__":
         print("  stale                          — Predictions >7 Tage ohne Ergebnis")
         print("  manual <id> <heim> <gast>      — Manuelles Ergebnis eintragen")
         print("  void <id>                      — Spiel als ausgefallen markieren")
+        print("  cleanup [--dry-run] [--days=N]  — Alte Odds-Snapshots löschen (Standard: 90 Tage)")
         sys.exit(1)

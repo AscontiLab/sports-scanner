@@ -35,6 +35,20 @@ def _format_prediction_row(r: sqlite3.Row) -> dict:
     elif r["bet_won"] == 0:
         status = "verloren"
 
+    # Review-Felder robust lesen (Spalten koennen fehlen bei altem Schema)
+    try:
+        op_status = r["operator_status"]
+    except (IndexError, KeyError):
+        op_status = None
+    try:
+        op_note = r["operator_note"]
+    except (IndexError, KeyError):
+        op_note = None
+    try:
+        op_updated = r["operator_updated_at"]
+    except (IndexError, KeyError):
+        op_updated = None
+
     return {
         "prediction_id": r["id"],
         "league": ALL_LABELS.get(r["sport_key"], r["sport_key"]),
@@ -53,6 +67,9 @@ def _format_prediction_row(r: sqlite3.Row) -> dict:
         "model_pnl": round(r["pnl_eur"], 2) if r["pnl_eur"] is not None else None,
         "kick_off": r["commence_time"],
         "bet_type": r["bet_type"],
+        "operator_status": op_status,
+        "operator_note": op_note,
+        "operator_updated_at": op_updated,
     }
 
 
@@ -66,13 +83,14 @@ def _get_todays_bets() -> list[dict]:
         SELECT id, sport_key, home_team, away_team, tip,
                best_odds, edge_pct, stake_eur, actual_stake_eur, tier,
                confidence_score, placed, placed_at, bet_won, pnl_eur, actual_pnl_eur,
-               commence_time, bet_type
+               commence_time, bet_type,
+               operator_status, operator_note, operator_updated_at
         FROM predictions
         WHERE placed = 1
-          AND SUBSTR(commence_time, 1, 10) = ?
+          AND commence_time >= ? AND commence_time < date(?, '+1 day')
         ORDER BY commence_time ASC
         """,
-        (today,),
+        (today, today),
     ).fetchall()
     conn.close()
     return [_format_prediction_row(r) for r in rows]
@@ -98,6 +116,9 @@ def _get_todays_recommendations() -> list[dict]:
             "status": "placed" if r["placed"] else "recommended",
             "kick_off": r["commence_time"],
             "bet_type": r["bet_type"],
+            "operator_status": r.get("operator_status"),
+            "operator_note": r.get("operator_note"),
+            "operator_updated_at": r.get("operator_updated_at"),
         }
         for r in rows
     ]
@@ -113,7 +134,8 @@ def _get_recent_bets(days: int = 7) -> list[dict]:
                ROUND(best_odds, 2) AS best_odds,
                edge_pct, stake_eur, actual_stake_eur, tier,
                confidence_score, placed, placed_at, bet_won, pnl_eur, actual_pnl_eur,
-               commence_time, bet_type
+               commence_time, bet_type,
+               operator_status, operator_note, operator_updated_at
         FROM predictions
         WHERE placed = 1
           AND bet_won IS NOT NULL
