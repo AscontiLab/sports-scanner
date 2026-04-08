@@ -528,6 +528,49 @@ class OutputHandler(SimpleHTTPRequestHandler):
             self._json_response({"ok": True, "placement": result})
             return
 
+        if self.path == "/api/sports-bets/resolve":
+            try:
+                from backtesting import resolve_bet_simple
+                from write_sports_dashboard_data import main as refresh_sports_dashboard_data
+            except Exception:
+                self._json_response({"ok": False, "error": "Backtesting-Modul nicht ladbar"}, 500)
+                return
+
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length) if content_length > 0 else b"{}"
+            try:
+                payload = json.loads(body.decode("utf-8"))
+            except Exception:
+                self._json_response({"ok": False, "error": "Ungueltiges JSON"}, 400)
+                return
+
+            prediction_id = payload.get("prediction_id")
+            if not isinstance(prediction_id, int):
+                self._json_response({"ok": False, "error": "prediction_id muss int sein"}, 400)
+                return
+
+            won = payload.get("won")
+            if not isinstance(won, bool):
+                self._json_response({"ok": False, "error": "won muss bool sein"}, 400)
+                return
+
+            try:
+                result = resolve_bet_simple(prediction_id, won)
+            except ValueError as exc:
+                self._json_response({"ok": False, "error": str(exc)}, 400)
+                return
+            except Exception:
+                self._json_response({"ok": False, "error": "Bet konnte nicht aufgeloest werden"}, 500)
+                return
+
+            try:
+                refresh_sports_dashboard_data()
+            except Exception:
+                pass
+
+            self._json_response({"ok": True, "result": result})
+            return
+
         self.send_response(404)
         self.end_headers()
         self.wfile.write(b"Not found")
