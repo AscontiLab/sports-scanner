@@ -69,11 +69,16 @@ Scanner fuer Value Bets in Fussball und Tennis. Das System kombiniert statistisc
 ## Voraussetzungen
 
 - Python 3.10+
+- `scanner-common` als pip-Paket (nicht mehr lokale Kopie)
 - Pakete aus `requirements.txt` oder mindestens:
   - `requests`
   - `pandas`
   - `numpy`
   - `scipy`
+
+## Sicherheit
+
+- SQL Injection Fix: `_validate_identifier()` in `backtesting.py` validiert dynamische Tabellen-/Spaltennamen
 
 ## Einrichtung
 
