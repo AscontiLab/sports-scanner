@@ -38,6 +38,13 @@ _DEFAULT_DB_PATH = Path(__file__).parent / "sports_backtesting.db"
 DB_PATH = _DEFAULT_DB_PATH
 
 
+def _validate_identifier(name: str) -> str:
+    """Prueft ob ein SQL-Identifier (Tabelle/Spalte) sicher ist."""
+    if not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", name):
+        raise ValueError(f"Ungueltiger SQL-Identifier: {name!r}")
+    return name
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SCHEMA
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -361,9 +368,8 @@ def _migrate_wettplan_columns(conn: sqlite3.Connection) -> None:
     ]
     for col_name, col_type in migrations:
         if col_name not in existing:
-            assert re.fullmatch(r'[a-z_]+', col_name), f"Ungueltiger Spaltenname: {col_name}"
-            assert re.fullmatch(r'[A-Z ]+[0-9]*', col_type), f"Ungueltiger Typ: {col_type}"
-            conn.execute(f"ALTER TABLE predictions ADD COLUMN {col_name} {col_type}")
+            _validate_identifier(col_name)
+            conn.execute(f"ALTER TABLE predictions ADD COLUMN {_validate_identifier(col_name)} {col_type}")
             print(f"[Backtesting] Migration: Spalte '{col_name}' hinzugefügt")
 
 
