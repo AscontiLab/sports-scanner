@@ -55,6 +55,14 @@ Scanner fuer Value Bets in Fussball und Tennis. Das System kombiniert statistisc
   - E-Mail-Versand des Sports-Reports
 - `send_kicktipp_report.py`
   - E-Mail-Versand der Kicktipp-Prognosen
+- `freebet_advisor.py`
+  - Freebet-Strategie und Empfehlungen
+- `model_cache.py`
+  - Cache fuer Modell-Ergebnisse (vermeidet redundante API-Calls)
+- `write_sports_dashboard_data.py`
+  - Bankroll + Bets an Unified Dashboard pushen
+- `backup_db.sh`
+  - Datenbank-Backup Script
 - `run_sports_scanner.sh`
   - Wrapper mit Locking, Logging und Folgeaktionen
 
