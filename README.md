@@ -197,6 +197,24 @@ Datengetriebenes Tuning basierend auf Backtesting (48 Bets, 18.8% Win-Rate):
 - **Timezone**: Uhrzeit/Datum im Hub jetzt in Europe/Berlin statt UTC
 - **API**: `hub-summary` liefert `tips` statt `newsItems`, zusaetzlich `codeReview`
 
+## Tennis-Daten Update (2026-04-09)
+
+- **tennis-data.co.uk Integration**: Neue Datenquelle fuer Tennis-Elo (2025+), ergaenzt Sackmann-Daten (bis 2024)
+- **Automatische Name-Normalisierung** zwischen Formaten, Cache in `cache/` Verzeichnis
+- **Elo-Konsens-Blend**: Bei veralteten Elo-Daten automatischer Blend mit Bookie-Konsens. Gewichtung basiert auf Datenalter (0-90d: 100% Elo, bis 630d: linear bis 20%)
+- **Tennis-Pool-Fix**: Reservierte Tennis-Slots funktionieren jetzt korrekt (`type` vs `bet_type` Key-Fix)
+
+## Kombi-Wetten (2026-04-09)
+
+- Automatische 2er/3er-Kombis aus selektierten Bets
+- Verschiedene Ligen + Bet-Typen erforderlich
+- Max Gesamtquote 10
+- Angezeigt im Dashboard
+
+## Tuning-Report Fix (2026-04-09)
+
+- Basiert jetzt auf platzierten Bets (`placed=1`) statt allen selektierten
+
 ## Status
 
 Produktionsnaher Sports-Scanner mit 7 Ligen + UEFA + Tennis, Bet Selection, Bankroll-Management, Auto-Resolve, Kicktipp und Hub-API.
