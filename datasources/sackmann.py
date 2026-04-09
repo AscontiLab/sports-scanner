@@ -71,7 +71,12 @@ def detect_surface(tournament_name: str) -> str | None:
     return None
 
 
+_MAX_AVAILABLE_YEAR = 2024  # Jeff Sackmann Repo geht aktuell nur bis 2024
+
+
 def download_atp_year(year: int) -> pd.DataFrame | None:
+    if year > _MAX_AVAILABLE_YEAR:
+        return None
     url = f"{ATP_BASE}/atp_matches_{year}.csv"
     try:
         r = _request_with_retry(url, timeout=30)
@@ -83,6 +88,8 @@ def download_atp_year(year: int) -> pd.DataFrame | None:
 
 
 def download_wta_year(year: int) -> pd.DataFrame | None:
+    if year > _MAX_AVAILABLE_YEAR:
+        return None
     url = f"{WTA_BASE}/wta_matches_{year}.csv"
     try:
         r = _request_with_retry(url, timeout=30)

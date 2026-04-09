@@ -22,6 +22,7 @@ from bankroll_manager import (
     rebuild_all_snapshots,
 )
 from backtesting import get_recommended_predictions
+from bet_selector import generate_combo_suggestions
 from config import STARTING_BANKROLL, ALL_LABELS
 
 _DB_PATH = Path(__file__).parent / "sports_backtesting.db"
@@ -116,6 +117,7 @@ def _get_todays_recommendations() -> list[dict]:
             "status": "placed" if r["placed"] else "recommended",
             "kick_off": r["commence_time"],
             "bet_type": r["bet_type"],
+            "bet_won": r["bet_won"] if r["bet_won"] is not None else None,
             "operator_status": r.get("operator_status"),
             "operator_note": r.get("operator_note"),
             "operator_updated_at": r.get("operator_updated_at"),
@@ -203,6 +205,11 @@ def main():
     win_rate = round(won / total_resolved * 100, 1) if total_resolved > 0 else 0.0
     roi = round(bankroll_info["total_pnl"] / total_stake * 100, 1) if total_stake > 0 else 0.0
 
+    # Kombi-Vorschlaege aus heutigen Empfehlungen generieren
+    combo_suggestions = []
+    if todays_recommendations:
+        combo_suggestions = generate_combo_suggestions(todays_recommendations)
+
     bankroll_data = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "bankroll": {
@@ -220,6 +227,7 @@ def main():
         "todays_recommendations": todays_recommendations,
         "todays_bets": todays_bets,
         "recent_bets": recent_bets,
+        "combo_suggestions": combo_suggestions,
     }
 
     bankroll_path = _OUTPUT_DIR / "sports_bankroll.json"

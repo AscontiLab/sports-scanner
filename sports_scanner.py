@@ -527,7 +527,8 @@ def analyze_uefa_match(match: dict, elo_dict: dict,
 
 def analyze_tennis_match(match: dict, tournament: str, elo_dict: dict,
                          surface_elo: dict | None = None,
-                         training_matches: int = 0) -> list:
+                         training_matches: int = 0,
+                         elo_blend_weight: float = 1.0) -> list:
     p1 = match["home_team"]
     p2 = match["away_team"]
 
@@ -552,13 +553,25 @@ def analyze_tennis_match(match: dict, tournament: str, elo_dict: dict,
     best = best_odds_from_match(match)
     bets = []
 
+    # Bookie-Konsens immer holen (fuer Blend oder Fallback)
+    consensus = bookie_consensus(match)
+    cons_p1 = consensus.get("home")
+    cons_p2 = consensus.get("away")
+
     if elo1 is not None and elo2 is not None:
-        prob1 = predict_tennis_win_prob(elo1, elo2)
-        prob2 = 1 - prob1
+        elo_prob1 = predict_tennis_win_prob(elo1, elo2)
+        elo_prob2 = 1 - elo_prob1
+        # Bei veralteten Elo-Daten mit Konsens blenden
+        if elo_blend_weight < 1.0 and cons_p1 and cons_p2:
+            w = elo_blend_weight
+            prob1 = w * elo_prob1 + (1 - w) * cons_p1
+            prob2 = w * elo_prob2 + (1 - w) * cons_p2
+            model_source = f"{model_source}+Konsens ({w:.0%}/{1-w:.0%})"
+        else:
+            prob1, prob2 = elo_prob1, elo_prob2
     else:
-        consensus = bookie_consensus(match)
-        prob1 = consensus.get("home")
-        prob2 = consensus.get("away")
+        prob1 = cons_p1
+        prob2 = cons_p2
         if not prob1 or not prob2:
             return []
         model_source = "Konsens"
@@ -847,8 +860,8 @@ def run_tennis_scan(api_key: str, run_id: int) -> tuple[list, list | None]:
     with ThreadPoolExecutor(max_workers=2) as pool:
         atp_future = pool.submit(compute_tennis_elo, elo_years)
         wta_future = pool.submit(compute_wta_elo, elo_years)
-        atp_elo_dict, atp_surface_elo, atp_training_matches = atp_future.result()
-        wta_elo_dict, wta_surface_elo, wta_training_matches = wta_future.result()
+        atp_elo_dict, atp_surface_elo, atp_training_matches, atp_max_date = atp_future.result()
+        wta_elo_dict, wta_surface_elo, wta_training_matches, wta_max_date = wta_future.result()
     print(f"  ATP: {len(atp_elo_dict)} Spieler im Elo-Dict")
     for surf, sdict in atp_surface_elo.items():
         print(f"    {surf}: {len(sdict)} Spieler")
@@ -862,6 +875,17 @@ def run_tennis_scan(api_key: str, run_id: int) -> tuple[list, list | None]:
     for surf in ["Hard", "Clay", "Grass"]:
         combined_surface_elo[surf] = {**atp_surface_elo.get(surf, {}),
                                       **wta_surface_elo.get(surf, {})}
+
+    # Elo-Daten-Alter pruefen und bei veralteten Daten Richtung Default daempfen
+    from datetime import datetime as _dt
+    newest_date = max(filter(None, [atp_max_date, wta_max_date]), default=None)
+    elo_stale_days = (_dt.now() - newest_date).days if newest_date else 999
+    if elo_stale_days > 180:
+        print(f"  ⚠ Elo-Daten {elo_stale_days} Tage alt — Blend mit Bookie-Konsens aktiv")
+    elo_blend_weight = max(0.2, min(1.0, 1.0 - (elo_stale_days - 90) / 540))
+    # 0-90 Tage: 100% Elo, 90-630 Tage: linear bis 20%, nie unter 20%
+    # Elo behaelt immer min. 20% Gewicht (langfristige Spielerstaerke bleibt relevant)
+    print(f"  Elo-Gewicht: {elo_blend_weight:.0%} (Daten {elo_stale_days}d alt)")
 
     print("\n[🎾 Tennis] Aktive Turniere suchen …")
     try:
@@ -892,6 +916,7 @@ def run_tennis_scan(api_key: str, run_id: int) -> tuple[list, list | None]:
             bets = analyze_tennis_match(
                 match, title, combined_elo, combined_surface_elo,
                 training_matches=combined_tennis_training,
+                elo_blend_weight=elo_blend_weight,
             )
             if bets:
                 enrich_bets_with_market_data(bets, match)

@@ -473,15 +473,19 @@ def log_prediction(
                 (match_id, tip_val, ou_line_val),
             ).fetchone()
             if existing:
-                # Update selected/stake wenn sich Wettplan geändert hat
-                if selected:
-                    conn.execute(
-                        """UPDATE predictions SET selected = ?, stake_eur = ?,
-                           tier = ?, confidence_score = ?, best_odds = ?
-                           WHERE id = ?""",
-                        (selected, stake_eur, tier, confidence_score,
-                         bet_dict.get("best_odds", 0.0), existing[0]),
-                    )
+                # Update Wettplan + Modellwerte (falls Modell sich geaendert hat)
+                conn.execute(
+                    """UPDATE predictions SET selected = ?, stake_eur = ?,
+                       tier = ?, confidence_score = ?, best_odds = ?,
+                       model_prob = ?, edge_pct = ?, kelly_pct = ?,
+                       model_source = ?, run_id = ?
+                       WHERE id = ?""",
+                    (selected, stake_eur, tier, confidence_score,
+                     bet_dict.get("best_odds", 0.0),
+                     bet_dict.get("model_prob"), bet_dict.get("edge_pct"),
+                     bet_dict.get("kelly_pct"), model_source, run_id,
+                     existing[0]),
+                )
                 return existing[0]
 
         cur = conn.execute(

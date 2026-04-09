@@ -287,18 +287,18 @@ def generate_tuning_report() -> dict:
         }
     """
     with _connect() as conn:
-        # Gesamtperformance (selected resolved)
+        # Gesamtperformance (placed resolved — nur tatsaechlich platzierte Bets)
         overall = conn.execute(
             """
             SELECT
                 COUNT(*) AS total,
                 SUM(CASE WHEN bet_won = 1 THEN 1 ELSE 0 END) AS won,
-                ROUND(SUM(pnl_eur), 2) AS total_pnl,
-                ROUND(SUM(stake_eur), 2) AS total_stake,
+                ROUND(SUM(COALESCE(actual_pnl_eur, pnl_eur)), 2) AS total_pnl,
+                ROUND(SUM(COALESCE(actual_stake_eur, stake_eur)), 2) AS total_stake,
                 ROUND(AVG(edge_pct), 1) AS avg_edge,
                 ROUND(AVG(best_odds), 2) AS avg_odds
             FROM predictions
-            WHERE selected = 1 AND bet_won IS NOT NULL
+            WHERE placed = 1 AND bet_won IS NOT NULL
             """
         ).fetchone()
 
@@ -327,7 +327,7 @@ def generate_tuning_report() -> dict:
                 ROUND(SUM(pnl_eur), 2) AS pnl,
                 ROUND(SUM(stake_eur), 2) AS stake
             FROM predictions
-            WHERE selected = 1 AND bet_won IS NOT NULL
+            WHERE placed = 1 AND bet_won IS NOT NULL
             GROUP BY sport_key ORDER BY pnl
             """
         ).fetchall()
@@ -355,7 +355,7 @@ def generate_tuning_report() -> dict:
                     SUM(CASE WHEN bet_won = 1 THEN 1 ELSE 0 END) AS won,
                     ROUND(SUM(pnl_eur), 2) AS pnl
                 FROM predictions
-                WHERE selected = 1 AND bet_won IS NOT NULL
+                WHERE placed = 1 AND bet_won IS NOT NULL
                   AND edge_pct >= ? AND edge_pct < ?
                 """,
                 (low, high),
@@ -379,7 +379,7 @@ def generate_tuning_report() -> dict:
                     SUM(CASE WHEN bet_won = 1 THEN 1 ELSE 0 END) AS won,
                     ROUND(SUM(pnl_eur), 2) AS pnl
                 FROM predictions
-                WHERE selected = 1 AND bet_won IS NOT NULL
+                WHERE placed = 1 AND bet_won IS NOT NULL
                   AND best_odds >= ? AND best_odds < ?
                 """,
                 (low, high),
@@ -403,7 +403,7 @@ def generate_tuning_report() -> dict:
                     ROUND(SUM(pnl_eur), 2) AS pnl,
                     ROUND(SUM(stake_eur), 2) AS stake
                 FROM predictions
-                WHERE selected = 1 AND bet_won IS NOT NULL AND bet_type = ?
+                WHERE placed = 1 AND bet_won IS NOT NULL AND bet_type = ?
                 """,
                 (bt,),
             ).fetchone()

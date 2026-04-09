@@ -131,7 +131,18 @@ def compute_confidence_score(bet: dict, model_stats: dict | None = None) -> floa
         bet.get("model_source")
         or _infer_model_source(bet)
     )
+    # Blend-Source auf Basis-Source mappen fuer Stats-Lookup
+    # z.B. "Elo (Clay)+Konsens (28%/72%)" → "Elo (Clay)" → "Elo (Hard)" etc.
     stats = model_stats.get(model_src, {})
+    if not stats and "+Konsens" in model_src:
+        base_src = model_src.split("+Konsens")[0].strip()
+        stats = model_stats.get(base_src, {})
+        if not stats:
+            # Fallback auf allgemeines Elo
+            for key in model_stats:
+                if key.startswith("Elo"):
+                    stats = model_stats[key]
+                    break
     resolved = stats.get("resolved", 0)
     won = stats.get("won", 0)
 
@@ -398,8 +409,11 @@ def select_bets(all_bets: list, bankroll: float | None = None) -> tuple[list, li
                      or _is_near_future(b.get("kick_off", ""), max_days=2))]
 
     # 3b. Separate Pools: Tennis + Fussball
-    tennis_pool = [b for b in playable if b.get("bet_type") == "tennis"]
-    football_pool = [b for b in playable if b.get("bet_type") != "tennis"]
+    # Scanner-Bets haben "type", DB-Bets haben "bet_type"
+    def _is_tennis(b):
+        return b.get("bet_type") == "tennis" or b.get("type") == "tennis"
+    tennis_pool = [b for b in playable if _is_tennis(b)]
+    football_pool = [b for b in playable if not _is_tennis(b)]
     tennis_pool.sort(key=lambda b: b.get("confidence_score", 0), reverse=True)
     football_pool.sort(key=lambda b: b.get("confidence_score", 0), reverse=True)
 
@@ -468,3 +482,125 @@ def select_bets(all_bets: list, bankroll: float | None = None) -> tuple[list, li
               f"| Edge {bet.get('edge_pct', 0):.1f}%")
 
     return selected, watch
+
+
+def generate_combo_suggestions(selected_bets: list) -> list[dict]:
+    """
+    Erzeugt Kombi-Wetten-Vorschlaege aus den selektierten Einzel-Bets.
+
+    Kombiniert nur niedrig-korrelierte Bets:
+    - Verschiedene Ligen (sport_key) erforderlich
+    - Verschiedene Wetttypen bevorzugt (Tennis, O/U, 1X2)
+    - Niemals Bets aus demselben Spiel kombinieren
+    - Max. Gesamtquote 10 (hoehere Kombis zu riskant)
+
+    Returns: Max. 3 Kombis sortiert nach combined_edge, absteigend.
+    """
+    from itertools import combinations
+
+    if len(selected_bets) < 2:
+        return []
+
+    combos = []
+
+    # 2er und 3er Kombis generieren
+    for size in (2, 3):
+        if len(selected_bets) < size:
+            continue
+
+        for group in combinations(selected_bets, size):
+            # Korrelations-Pruefung: verschiedene Ligen erforderlich
+            sport_keys = set()
+            match_keys = set()
+            bet_types = set()
+            valid = True
+
+            for bet in group:
+                sk = bet.get("sport_key", "") or bet.get("sport", "")
+                mk = _match_key(bet)
+                bt = _bet_market_type(bet)
+
+                # Gleiches Spiel → sofort verwerfen
+                if mk in match_keys:
+                    valid = False
+                    break
+
+                # Gleiche Liga → verwerfen (niedrige Korrelation gefordert)
+                if sk in sport_keys:
+                    valid = False
+                    break
+
+                sport_keys.add(sk)
+                match_keys.add(mk)
+                bet_types.add(bt)
+
+            if not valid:
+                continue
+
+            # Gesamtquote berechnen (Produkt der Einzelquoten)
+            combined_odds = 1.0
+            for bet in group:
+                odds = bet.get("best_odds", bet.get("odds", 1.0))
+                combined_odds *= odds
+
+            # Zu hohe Gesamtquote → zu riskant
+            if combined_odds > 10.0:
+                continue
+
+            # Combined Edge berechnen:
+            # Produkt der Modell-Wahrscheinlichkeiten vs. implizite Kombi-Wahrscheinlichkeit
+            combined_model_prob = 1.0
+            for bet in group:
+                mp = bet.get("model_prob", 0.0)
+                combined_model_prob *= mp
+
+            implied_prob = 1.0 / combined_odds if combined_odds > 0 else 0
+            combined_edge = (combined_model_prob * combined_odds - 1.0) * 100 if combined_odds > 0 else 0
+
+            # Nur Kombis mit positivem Edge
+            if combined_edge <= 0:
+                continue
+
+            # Diversitaets-Bonus: verschiedene Wetttypen bevorzugen
+            diversity_bonus = len(bet_types) / size  # 1.0 = alle verschieden
+
+            # Stake: 50% des Durchschnitts-Stakes der Einzel-Bets (Kombis riskanter)
+            avg_stake = sum(b.get("stake_eur", 0) for b in group) / size
+            suggested_stake = round(avg_stake * 0.5, 2)
+
+            legs = []
+            for bet in group:
+                legs.append({
+                    "match": bet.get("match", "") or _match_key(bet),
+                    "tip": bet.get("tip", ""),
+                    "odds": round(bet.get("best_odds", bet.get("odds", 0)), 2),
+                    "league": bet.get("league", bet.get("sport_key", "")),
+                    "bet_type": _bet_market_type(bet),
+                    "edge_pct": round(bet.get("edge_pct", 0), 1),
+                    "tier": bet.get("tier", ""),
+                })
+
+            combos.append({
+                "size": size,
+                "legs": legs,
+                "combined_odds": round(combined_odds, 2),
+                "combined_edge": round(combined_edge, 1),
+                "combined_model_prob": round(combined_model_prob * 100, 1),
+                "diversity_score": round(diversity_bonus, 2),
+                "suggested_stake": max(suggested_stake, 0.50),
+            })
+
+    # Sortierung: combined_edge absteigend, Diversitaet als Tiebreaker
+    combos.sort(key=lambda c: (c["combined_edge"], c["diversity_score"]), reverse=True)
+
+    # Max. 3 beste Kombis zurueckgeben
+    result = combos[:3]
+
+    if result:
+        print(f"[Kombi-Vorschlaege] {len(result)} Kombis aus {len(selected_bets)} Einzel-Bets generiert")
+        for c in result:
+            labels = " + ".join(leg["match"][:20] for leg in c["legs"])
+            print(f"  {c['size']}er: {labels} → Quote {c['combined_odds']:.2f}, "
+                  f"Edge {c['combined_edge']:.1f}%, Stake {c['suggested_stake']:.2f} EUR")
+
+    return result
