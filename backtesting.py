@@ -365,6 +365,7 @@ def _migrate_wettplan_columns(conn: sqlite3.Connection) -> None:
         ("operator_status",  "TEXT"),
         ("operator_note",    "TEXT"),
         ("operator_updated_at", "TEXT"),
+        ("reasoning",        "TEXT"),
     ]
     for col_name, col_type in migrations:
         if col_name not in existing:
@@ -619,6 +620,15 @@ def update_prediction_selection(
             WHERE id = ?
             """,
             (confidence_score, tier, stake_eur, selected, prediction_id),
+        )
+
+
+def update_prediction_reasoning(prediction_id: int, reasoning: str) -> None:
+    """Speichert Reasoning-Text fuer eine Prediction."""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE predictions SET reasoning = ? WHERE id = ?",
+            (reasoning, prediction_id),
         )
 
 

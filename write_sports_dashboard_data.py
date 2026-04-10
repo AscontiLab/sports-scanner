@@ -71,6 +71,7 @@ def _format_prediction_row(r: sqlite3.Row) -> dict:
         "operator_status": op_status,
         "operator_note": op_note,
         "operator_updated_at": op_updated,
+        "reasoning": r["reasoning"] if "reasoning" in r.keys() else None,
     }
 
 
@@ -85,7 +86,7 @@ def _get_todays_bets() -> list[dict]:
                best_odds, edge_pct, stake_eur, actual_stake_eur, tier,
                confidence_score, placed, placed_at, bet_won, pnl_eur, actual_pnl_eur,
                commence_time, bet_type,
-               operator_status, operator_note, operator_updated_at
+               operator_status, operator_note, operator_updated_at, reasoning
         FROM predictions
         WHERE placed = 1
           AND commence_time >= ? AND commence_time < date(?, '+1 day')
@@ -121,6 +122,7 @@ def _get_todays_recommendations() -> list[dict]:
             "operator_status": r.get("operator_status"),
             "operator_note": r.get("operator_note"),
             "operator_updated_at": r.get("operator_updated_at"),
+            "reasoning": r.get("reasoning"),
         }
         for r in rows
     ]

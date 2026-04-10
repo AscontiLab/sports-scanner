@@ -1326,6 +1326,17 @@ def main() -> int:
                     selected=b.get("selected", 0),
                 )
 
+    # Reasoning (Gemma erklaert die Bets)
+    try:
+        from bet_reasoning import add_reasoning_to_bets
+        from backtesting import update_prediction_reasoning
+        add_reasoning_to_bets(selected_bets)
+        for b in selected_bets:
+            if b.get("reasoning") and b.get("_pred_id"):
+                update_prediction_reasoning(b["_pred_id"], b["reasoning"])
+    except Exception as e:
+        print(f"[Reasoning] Uebersprungen: {e}")
+
     # Report & Alerts
     run_report_and_alerts(
         all_football_bets, all_ou_bets, all_tennis_bets,
