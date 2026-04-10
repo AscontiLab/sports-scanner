@@ -59,6 +59,10 @@ Scanner fuer Value Bets in Fussball und Tennis. Das System kombiniert statistisc
   - Freebet-Strategie und Empfehlungen
 - `model_cache.py`
   - Cache fuer Modell-Ergebnisse (vermeidet redundante API-Calls)
+- `bet_reasoning.py`
+  - Generiert 1-2 Satz-Erklaerungen pro Bet via Gemma 4 (Ollama)
+  - Laeuft automatisch nach Bet Selection, max 10 Bets pro Scan
+  - Reasoning wird in DB gespeichert (`predictions.reasoning`) und ins Dashboard-JSON exportiert
 - `write_sports_dashboard_data.py`
   - Bankroll + Bets an Unified Dashboard pushen
 - `backup_db.sh`
@@ -214,6 +218,13 @@ Datengetriebenes Tuning basierend auf Backtesting (48 Bets, 18.8% Win-Rate):
 ## Tuning-Report Fix (2026-04-09)
 
 - Basiert jetzt auf platzierten Bets (`placed=1`) statt allen selektierten
+
+## Bet Reasoning (2026-04-10)
+
+- `bet_reasoning.py` generiert kurze Erklaerungen (1-2 Saetze) pro selektiertem Bet via Gemma 4 (Ollama)
+- Laeuft automatisch nach der Bet Selection, maximal 10 Bets pro Scan
+- Reasoning wird in der DB gespeichert (`predictions.reasoning` Spalte) und ins Dashboard-JSON exportiert
+- Im Unified Dashboard unter jedem Match-Namen angezeigt
 
 ## Status
 
