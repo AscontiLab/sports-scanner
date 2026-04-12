@@ -100,7 +100,7 @@ def predict_football(home: str, away: str, model: dict, max_goals: int = 8):
 def predict_ou(lam_home: float, lam_away: float, line: float) -> tuple[float, float]:
     """
     Berechnet P(Ueber line) und P(Unter line) via Poisson.
-    Korrekt fuer .5-Linien (2.5, 3.5) und ganzzahlige Linien (2.0, 3.0).
+    Korrekt fuer .5-Linien (2.5, 3.5) — nur diese werden vom Scanner genutzt.
     Gibt (p_over, p_under) zurueck, die sich zu 1.0 summieren.
     """
     lam_total = lam_home + lam_away

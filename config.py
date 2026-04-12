@@ -211,17 +211,36 @@ MODEL_TRUST_FLOOR = 0.05             # Minimaler Trust-Multiplikator
 # HARD FILTERS (basierend auf Performance-Analyse)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-MAX_EDGE_HARD_CAP = None               # Deaktiviert — wird am 2026-03-30 mit Daten neu bewertet
-MAX_ODDS_SELECTED = None               # Deaktiviert — wird am 2026-03-30 mit Daten neu bewertet
+MAX_EDGE_HARD_CAP = 20.0               # Edge > 20% = Modell-Overconfidence (ROI -29% bei 20-30%, -35% bei 30%+)
+MAX_ODDS_SELECTED = None               # Deaktiviert — Odds-Filter laeuft ueber Backtesting-Regeln
 OU_BONUS_POINTS = 12.0                # O/U-Wetten: +12 Punkte Confidence Bonus (41.7% Win-Rate)
 PENALTY_1X2_POINTS = 4.0              # 1X2-Wetten: -4 Punkte (Draws ausgenommen, siehe bet_selector)
 
-# Liga-spezifische Mindest-Edge (aktuell leer — zu wenig Daten für Ausschlüsse)
-# Wird am 2026-03-30 mit mehr Backtesting-Daten neu bewertet
+# Liga-spezifische Mindest-Edge (aktuell leer)
 LEAGUE_MIN_EDGE = {}
 
-# Tennis: Am 2026-03-30 mit mehr Daten neu bewerten
 TENNIS_ENABLED = True
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BACKTESTING-BASIERTE FILTER (Stand 2026-04-12, N=1919 resolved Bets)
+# Bets werden NICHT geloescht, sondern auf Watch gesetzt → weiter Daten sammeln
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# UEFA CL/EL O/U: 218 Bets, 1.4% Win, -97% ROI — Poisson-Modell versagt bei Cup-Spielen
+BLOCK_OU_LEAGUES = [
+    "soccer_uefa_champs_league",
+    "soccer_uefa_europa_league",
+    "soccer_italy_serie_a",            # O/U Serie A: N=122, 33.6% Win, -38% ROI
+]
+
+# Over in bestimmten Ligen: Bundesliga 4.8% Win (-91%), EPL 0% Win (-100%)
+BLOCK_OVER_LEAGUES = [
+    "soccer_germany_bundesliga",
+    "soccer_epl",
+]
+
+# Tennis Odds-Cap: Underdogs (3.00+) haben 5.6% Win, -66% ROI
+TENNIS_MAX_ODDS = 3.00
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # KOMBINIERTE LABELS

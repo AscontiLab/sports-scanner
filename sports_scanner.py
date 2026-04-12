@@ -407,7 +407,9 @@ def analyze_football_ou(match: dict, model: dict) -> list:
 
     for entry in ou_lines:
         line = entry["line"]
-        if abs(line - round(line)) < 1e-9:
+        # Nur .5-Linien (2.5, 3.5) — ganzzahlige und Quarter Lines (2.25, 2.75) raus
+        frac = line - int(line)
+        if abs(frac - 0.5) > 1e-9:
             continue
         p_over, p_under = predict_ou(lam_home, lam_away, line)
         for side, model_p, odds in [
@@ -499,7 +501,9 @@ def analyze_uefa_match(match: dict, elo_dict: dict,
                 ou_lines = best_ou_odds_from_match(match)
                 for entry in ou_lines:
                     line = entry["line"]
-                    if abs(line - round(line)) < 1e-9:
+                    # Nur .5-Linien (2.5, 3.5) — ganzzahlige und Quarter Lines raus
+                    frac = line - int(line)
+                    if abs(frac - 0.5) > 1e-9:
                         continue
                     p_over, p_under = predict_ou(lam_home, lam_away, line)
                     for side, model_p, odds in [

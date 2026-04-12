@@ -226,6 +226,22 @@ Datengetriebenes Tuning basierend auf Backtesting (48 Bets, 18.8% Win-Rate):
 - Reasoning wird in der DB gespeichert (`predictions.reasoning` Spalte) und ins Dashboard-JSON exportiert
 - Im Unified Dashboard unter jedem Match-Namen angezeigt
 
+## Backtesting-basierte Filter (2026-04-12)
+
+Datengetriebene Schaerfung basierend auf 1.919 resolved Bets:
+
+- **UEFA CL/EL O/U geblockt**: 218 Bets, 1.4% Win-Rate, -97% ROI — Poisson versagt bei Cup-Spielen
+- **Serie A O/U geblockt**: N=122, 33.6% Win, -38% ROI
+- **Over in Bundesliga/EPL geblockt**: Bundesliga 4.8% Win (-91%), EPL 0% Win (-100%)
+- **Edge-Cap 20%**: Alles darueber ist Modell-Overconfidence (20-30%: -29% ROI, 30%+: -35% ROI)
+- **Tennis Odds-Cap 3.00**: Underdogs (3.00+) haben 5.6% Win, -66% ROI
+- **Quarter Lines (2.25, 2.75) entfernt**: Nur noch .5-Linien (2.5, 3.5), nicht bespielbar
+- **O/U Korrelations-Filter verbessert**: Gegenlaeufige Bets (Over+Under) pro Spiel erkannt, nur staerkere Richtung bleibt. Bei Gleichstand .5-Linien bevorzugt
+
+Geblockte Bets werden weiterhin als Watch geloggt (Datensammlung fuer spaetere Re-Evaluierung).
+
+Profitabel bleiben: Under allgemein (+16.4% ROI), Over La Liga/3. Liga/Ligue 1, Home <2.00, Tennis-Favoriten (+36.7% ROI).
+
 ## Status
 
 Produktionsnaher Sports-Scanner mit 7 Ligen + UEFA + Tennis, Bet Selection, Bankroll-Management, Auto-Resolve, Kicktipp und Hub-API.

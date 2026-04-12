@@ -27,6 +27,9 @@ from config import (
     OU_BONUS_POINTS,
     PENALTY_1X2_POINTS,
     LEAGUE_MIN_EDGE,
+    BLOCK_OU_LEAGUES,
+    BLOCK_OVER_LEAGUES,
+    TENNIS_MAX_ODDS,
 )
 from bankroll_manager import calculate_stake, get_current_bankroll
 
@@ -277,24 +280,88 @@ def _outcome_type(bet: dict) -> str:
     return "other"
 
 
+def _ou_direction(bet: dict) -> str:
+    """Bestimmt die Richtung einer O/U-Wette: 'over' oder 'under'."""
+    tip = bet.get("tip", "").lower()
+    if tip.startswith("über") or tip.startswith("over"):
+        return "over"
+    return "under"
+
+
+def _is_half_line(bet: dict) -> bool:
+    """Prüft ob die Linie eine .5-Linie ist (liquider, eindeutiger als Quarter Lines)."""
+    line = bet.get("line", 0)
+    frac = line - int(line)
+    return abs(frac - 0.5) < 1e-9
+
+
+def _ou_sort_key(bet: dict) -> tuple:
+    """Sortierkriterium für O/U-Bets: Score absteigend, .5-Linien bevorzugt."""
+    return (
+        -bet.get("confidence_score", 0),
+        0 if _is_half_line(bet) else 1,  # .5-Linien zuerst bei Gleichstand
+    )
+
+
 def filter_correlated_bets(bets: list) -> list:
     """
     Korrelations-Filter: Max 1 Bet pro Markttyp (1X2 / O/U) pro Spiel.
-    Behält den Bet mit dem höchsten Confidence Score.
+
+    Fuer O/U-Bets zusaetzlich:
+    - Gegenlaeufige Richtungen (Over + Under) pro Spiel erkennen
+    - Nur die staerkere Richtung behalten (hoechster Score)
+    - Bei Gleichstand .5-Linien bevorzugen (liquider als Quarter Lines)
+
+    Fuer 1X2/Tennis: Hoechster Score gewinnt.
     """
-    best_per_match_market: dict[tuple[str, str], dict] = {}
+    # Schritt 1: O/U-Bets pro Spiel nach Richtung gruppieren
+    ou_by_match: dict[str, list] = {}
+    non_ou_bets: list = []
 
     for bet in bets:
+        market = _bet_market_type(bet)
+        if market == "ou":
+            mk = _match_key(bet)
+            ou_by_match.setdefault(mk, []).append(bet)
+        else:
+            non_ou_bets.append(bet)
+
+    # Schritt 2: Pro Spiel nur eine O/U-Richtung + beste Linie behalten
+    best_ou: dict[str, dict] = {}
+    for match_key, ou_bets in ou_by_match.items():
+        # Nach Richtung trennen
+        overs = [b for b in ou_bets if _ou_direction(b) == "over"]
+        unders = [b for b in ou_bets if _ou_direction(b) == "under"]
+
+        # Beste Bet pro Richtung ermitteln
+        best_over = min(overs, key=_ou_sort_key) if overs else None
+        best_under = min(unders, key=_ou_sort_key) if unders else None
+
+        # Nur eine Richtung behalten
+        if best_over and best_under:
+            # Gegenlaeufige Bets: Staerkere Richtung gewinnt
+            if _ou_sort_key(best_over) <= _ou_sort_key(best_under):
+                best_ou[match_key] = best_over
+            else:
+                best_ou[match_key] = best_under
+        elif best_over:
+            best_ou[match_key] = best_over
+        elif best_under:
+            best_ou[match_key] = best_under
+
+    # Schritt 3: 1X2/Tennis — max 1 pro (Spiel, Markt), hoechster Score
+    best_non_ou: dict[tuple[str, str], dict] = {}
+    for bet in non_ou_bets:
         match_key = _match_key(bet)
         market = _bet_market_type(bet)
         key = (match_key, market)
 
-        if key not in best_per_match_market:
-            best_per_match_market[key] = bet
-        elif bet.get("confidence_score", 0) > best_per_match_market[key].get("confidence_score", 0):
-            best_per_match_market[key] = bet
+        if key not in best_non_ou:
+            best_non_ou[key] = bet
+        elif bet.get("confidence_score", 0) > best_non_ou[key].get("confidence_score", 0):
+            best_non_ou[key] = bet
 
-    return list(best_per_match_market.values())
+    return list(best_ou.values()) + list(best_non_ou.values())
 
 
 def _is_today(kick_off: str) -> bool:
@@ -370,6 +437,41 @@ def select_bets(all_bets: list, bankroll: float | None = None) -> tuple[list, li
 
     if hard_filter_count > 0:
         print(f"[Bet-Selektor] {hard_filter_count} Bets durch Hard-Filter auf Watch gesetzt")
+
+    # 1e. BACKTESTING-BASIERTE FILTER (Daten werden weiter gesammelt)
+    bt_filter_count = 0
+    for bet in all_bets:
+        if bet.get("hard_filter"):
+            continue  # bereits gefiltert
+        sport_key = bet.get("sport_key", "") or bet.get("sport", "")
+        bet_type = bet.get("type", "").lower()
+        tip = bet.get("tip", "").lower()
+        odds = bet.get("best_odds", bet.get("odds", 0.0))
+        is_ou = bet_type in ("football_ou", "ou")
+        is_over = tip.startswith("über") or tip.startswith("over")
+        is_tennis = bet_type == "tennis"
+        reason = None
+
+        # UEFA CL/EL + Serie A: O/U komplett blocken (CL/EL: 1.4% Win, -97% ROI)
+        if is_ou and sport_key in BLOCK_OU_LEAGUES:
+            reason = f"BT:OU-LIGA"
+
+        # Over in Bundesliga/EPL blocken (BuLi: 4.8% Win, EPL: 0% Win)
+        elif is_ou and is_over and sport_key in BLOCK_OVER_LEAGUES:
+            reason = f"BT:OVER-LIGA"
+
+        # Tennis: Odds > 3.00 blocken (5.6% Win, -66% ROI)
+        elif is_tennis and odds > TENNIS_MAX_ODDS:
+            reason = f"BT:TENNIS-ODDS>{TENNIS_MAX_ODDS:.2f}"
+
+        if reason:
+            bet["tier"] = "Watch"
+            bet["bt_filter"] = reason
+            bet["confidence_score"] = min(bet["confidence_score"], TIER_VALUE_BET - 1)
+            bt_filter_count += 1
+
+    if bt_filter_count > 0:
+        print(f"[Bet-Selektor] {bt_filter_count} Bets durch Backtesting-Filter auf Watch gesetzt")
 
     # 1c. Market Disagreement Filter
     market_gap_count = 0
