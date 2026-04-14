@@ -42,7 +42,7 @@ Scanner fuer Value Bets in Fussball und Tennis. Das System kombiniert statistisc
 - `bankroll_manager.py`
   - Bankroll-Tracking, Quarter-Kelly Staking, Daily Snapshots
 - `backtesting.py`
-  - Speicherung, Auto-Resolve (Scores-API) und ROI-Auswertung
+  - Speicherung, Auto-Resolve (Scores-API), ROI-Auswertung und CLV-Tracking
 - `config.py`
   - Zentralisierte Konfiguration (Bankroll, Kelly, Limits, Confidence Weights)
   - TENNIS_ENABLED Toggle, LEAGUE_MIN_EDGE Map, Hard-Filter-Caps
@@ -126,6 +126,8 @@ python3 send_kicktipp_report.py
 python3 backtesting.py summary
 python3 backtesting.py open
 python3 backtesting.py resolve
+python3 backtesting.py clv            # CLV fuer resolved Bets berechnen
+python3 backtesting.py clv-stats      # CLV-Statistiken anzeigen
 ```
 
 ## Output
@@ -242,6 +244,25 @@ Geblockte Bets werden weiterhin als Watch geloggt (Datensammlung fuer spaetere R
 
 Profitabel bleiben: Under allgemein (+16.4% ROI), Over La Liga/3. Liga/Ligue 1, Home <2.00, Tennis-Favoriten (+36.7% ROI).
 
+## CLV-Tracking (2026-04-14)
+
+- **Closing Line Value** misst, ob unsere Quoten beim Platzieren besser waren als kurz vor Spielbeginn
+- DB-Spalten: `closing_odds`, `closing_odds_at`, `clv_pct`
+- `fetch_closing_odds()` holt Quoten nahe Anpfiff
+- CLV-Berechnung: `(best_odds / closing_odds - 1) * 100`
+- CLI: `python3 backtesting.py clv` und `python3 backtesting.py clv-stats`
+- Dashboard: CLV-Spalte in Bet-Tabellen + Stats-Card
+- Telegram: CLV pro Bet + woechentliche CLV-Summary
+- In Cron-Runner integriert (vor Resolve)
+
+## Cron
+
+```cron
+0 6 * * * cd /home/claude-agent/sports-scanner && bash run_sports_scanner.sh >> logs/cron.log 2>&1
+```
+
+Cron laeuft taeglich um 06:00 UTC (08:00 Berlin).
+
 ## Status
 
-Produktionsnaher Sports-Scanner mit 7 Ligen + UEFA + Tennis, Bet Selection, Bankroll-Management, Auto-Resolve, Kicktipp und Hub-API.
+Produktionsnaher Sports-Scanner mit 7 Ligen + UEFA + Tennis, Bet Selection, Bankroll-Management, Auto-Resolve, CLV-Tracking, Kicktipp und Hub-API.
