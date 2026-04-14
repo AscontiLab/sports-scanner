@@ -27,6 +27,15 @@ EXIT_CODE=$?
 
 echo "Ende: $(date '+%Y-%m-%d %H:%M:%S')  (Exit: $EXIT_CODE)" >> "$LOG_FILE"
 
+# Closing Odds fuer laufende Spiele holen
+echo "Closing Odds holen …" >> "$LOG_FILE"
+/usr/bin/python3 backtesting.py clv >> "$LOG_FILE" 2>&1
+if [ $? -eq 0 ]; then
+    echo "Closing Odds erfolgreich geholt." >> "$LOG_FILE"
+else
+    echo "HINWEIS: Closing Odds konnten nicht geholt werden." >> "$LOG_FILE"
+fi
+
 if [ $EXIT_CODE -eq 0 ]; then
     echo "Sende Sports-Report …" >> "$LOG_FILE"
     /usr/bin/python3 "$SCRIPT_DIR/send_sports_report.py" >> "$LOG_FILE" 2>&1

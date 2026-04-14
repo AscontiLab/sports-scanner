@@ -50,6 +50,16 @@ def _format_prediction_row(r: sqlite3.Row) -> dict:
     except (IndexError, KeyError):
         op_updated = None
 
+    # CLV-Felder robust lesen (Spalten koennen fehlen bei altem Schema)
+    try:
+        closing_odds = r["closing_odds"]
+    except (IndexError, KeyError):
+        closing_odds = None
+    try:
+        clv_pct = r["clv_pct"]
+    except (IndexError, KeyError):
+        clv_pct = None
+
     return {
         "prediction_id": r["id"],
         "league": ALL_LABELS.get(r["sport_key"], r["sport_key"]),
@@ -72,6 +82,8 @@ def _format_prediction_row(r: sqlite3.Row) -> dict:
         "operator_note": op_note,
         "operator_updated_at": op_updated,
         "reasoning": r["reasoning"] if "reasoning" in r.keys() else None,
+        "closing_odds": round(closing_odds, 2) if closing_odds is not None else None,
+        "clv": round(clv_pct, 1) if clv_pct is not None else None,
     }
 
 
@@ -86,7 +98,8 @@ def _get_todays_bets() -> list[dict]:
                best_odds, edge_pct, stake_eur, actual_stake_eur, tier,
                confidence_score, placed, placed_at, bet_won, pnl_eur, actual_pnl_eur,
                commence_time, bet_type,
-               operator_status, operator_note, operator_updated_at, reasoning
+               operator_status, operator_note, operator_updated_at, reasoning,
+               closing_odds, clv_pct
         FROM predictions
         WHERE placed = 1
           AND commence_time >= ? AND commence_time < date(?, '+1 day')
@@ -139,7 +152,8 @@ def _get_recent_bets(days: int = 7) -> list[dict]:
                edge_pct, stake_eur, actual_stake_eur, tier,
                confidence_score, placed, placed_at, bet_won, pnl_eur, actual_pnl_eur,
                commence_time, bet_type,
-               operator_status, operator_note, operator_updated_at
+               operator_status, operator_note, operator_updated_at,
+               closing_odds, clv_pct
         FROM predictions
         WHERE placed = 1
           AND bet_won IS NOT NULL
@@ -180,6 +194,45 @@ def _calculate_streak() -> dict:
     return {"type": streak_type, "count": count}
 
 
+def _get_clv_stats() -> dict:
+    """Berechnet CLV-Statistiken fuer alle resolved placed Bets mit CLV-Daten."""
+    conn = sqlite3.connect(_DB_PATH)
+    conn.row_factory = sqlite3.Row
+
+    # Check if clv_pct column exists
+    cols = [c[1] for c in conn.execute("PRAGMA table_info(predictions)").fetchall()]
+    if "clv_pct" not in cols:
+        conn.close()
+        return None
+
+    rows = conn.execute(
+        """
+        SELECT clv_pct, bet_won
+        FROM predictions
+        WHERE placed = 1
+          AND bet_won IS NOT NULL
+          AND clv_pct IS NOT NULL
+        """
+    ).fetchall()
+    conn.close()
+
+    if not rows:
+        return None
+
+    clv_values = [r["clv_pct"] for r in rows]
+    won_clv = [r["clv_pct"] for r in rows if r["bet_won"] == 1]
+    lost_clv = [r["clv_pct"] for r in rows if r["bet_won"] == 0]
+    positive_count = sum(1 for v in clv_values if v > 0)
+
+    return {
+        "avg_clv": round(sum(clv_values) / len(clv_values), 1),
+        "positive_pct": round(positive_count / len(clv_values) * 100, 1),
+        "avg_clv_won": round(sum(won_clv) / len(won_clv), 1) if won_clv else None,
+        "avg_clv_lost": round(sum(lost_clv) / len(lost_clv), 1) if lost_clv else None,
+        "count": len(clv_values),
+    }
+
+
 def main():
     _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -207,6 +260,9 @@ def main():
     win_rate = round(won / total_resolved * 100, 1) if total_resolved > 0 else 0.0
     roi = round(bankroll_info["total_pnl"] / total_stake * 100, 1) if total_stake > 0 else 0.0
 
+    # CLV-Statistiken
+    clv_stats = _get_clv_stats()
+
     # Kombi-Vorschlaege aus heutigen Empfehlungen generieren
     combo_suggestions = []
     if todays_recommendations:
@@ -230,6 +286,7 @@ def main():
         "todays_bets": todays_bets,
         "recent_bets": recent_bets,
         "combo_suggestions": combo_suggestions,
+        "clv_stats": clv_stats,
     }
 
     bankroll_path = _OUTPUT_DIR / "sports_bankroll.json"

@@ -55,11 +55,18 @@ def send_high_edge_alerts(all_bets: list, min_edge: float = 10.0) -> int:
     for b in sorted(high_edge, key=lambda x: -x.get("edge_pct", 0)):
         bet_type = b.get("type", b.get("bet_type", "?"))
         icon = "⚽" if "football" in bet_type else ("🎾" if bet_type == "tennis" else "🏆")
-        lines.append(
+        bet_line = (
             f"{icon} <b>{b['match']}</b>\n"
             f"   → {b.get('tip', '?')} @ {b.get('best_odds', 0):.2f}\n"
             f"   Edge: {b.get('edge_pct', 0):.1f}% | Kelly: {b.get('kelly_pct', 0):.1f}%"
         )
+        # CLV info if available
+        clv_pct = b.get("clv_pct")
+        closing_odds = b.get("closing_odds")
+        if clv_pct is not None and closing_odds is not None:
+            clv_icon = "✅" if clv_pct > 0 else "⚠️"
+            bet_line += f"\n   {clv_icon} CLV: {clv_pct:+.1f}%"
+        lines.append(bet_line)
 
     message = "\n".join(lines)
     if send_telegram(message, bot_token, chat_id):
@@ -94,6 +101,75 @@ def send_freebet_advice(mode: str, params: dict) -> bool:
 
     msg = result["telegram"]
     return send_telegram(msg, bot_token, chat_id)
+
+
+def send_clv_summary_alert(days: int = 7) -> bool:
+    """
+    Sendet eine CLV-Zusammenfassung der letzten N Tage via Telegram.
+    Gibt True zurueck wenn Nachricht gesendet wurde.
+    """
+    import sqlite3
+    from pathlib import Path
+    from datetime import datetime, timezone, timedelta
+
+    bot_token, chat_id = load_telegram_creds()
+    if not bot_token or not chat_id:
+        return False
+
+    db_path = Path(__file__).parent / "sports_backtesting.db"
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    # Check if clv_pct column exists
+    cols = [c[1] for c in conn.execute("PRAGMA table_info(predictions)").fetchall()]
+    if "clv_pct" not in cols:
+        conn.close()
+        return False
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    rows = conn.execute(
+        """
+        SELECT clv_pct, bet_won
+        FROM predictions
+        WHERE placed = 1
+          AND bet_won IS NOT NULL
+          AND clv_pct IS NOT NULL
+          AND commence_time >= ?
+        """,
+        (cutoff,),
+    ).fetchall()
+    conn.close()
+
+    if not rows:
+        return False
+
+    clv_values = [r["clv_pct"] for r in rows]
+    won_clv = [r["clv_pct"] for r in rows if r["bet_won"] == 1]
+    lost_clv = [r["clv_pct"] for r in rows if r["bet_won"] == 0]
+    positive_count = sum(1 for v in clv_values if v > 0)
+    total = len(clv_values)
+    avg_clv = sum(clv_values) / total
+    avg_won = sum(won_clv) / len(won_clv) if won_clv else 0
+    avg_lost = sum(lost_clv) / len(lost_clv) if lost_clv else 0
+
+    lines = [
+        f"📊 <b>CLV-Zusammenfassung (letzte {days} Tage)</b>\n",
+        f"∅ CLV: {avg_clv:+.1f}%",
+        f"Positive CLV: {positive_count / total * 100:.0f}% ({positive_count}/{total})",
+        f"∅ CLV gewonnen: {avg_won:+.1f}%",
+        f"∅ CLV verloren: {avg_lost:+.1f}%",
+        "",
+    ]
+    if avg_clv > 0:
+        lines.append("→ Dein Modell schlaegt den Markt ✓")
+    else:
+        lines.append("→ Markt schliesst zu deinen Gunsten — Edge pruefen ⚠")
+
+    message = "\n".join(lines)
+    if send_telegram(message, bot_token, chat_id):
+        print(f"    Telegram: CLV-Zusammenfassung ({days} Tage) gesendet")
+        return True
+    return False
 
 
 def send_tuning_alert(tuning_report: dict, bankroll_info: dict) -> bool:

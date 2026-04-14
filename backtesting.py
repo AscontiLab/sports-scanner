@@ -23,6 +23,8 @@ CLI:
     python3 backtesting.py stale            # Predictions >7 Tage ohne Ergebnis
     python3 backtesting.py manual <id> <h> <a>  # Manuelles Ergebnis eintragen
     python3 backtesting.py void <id>        # Spiel ausgefallen/verschoben
+    python3 backtesting.py clv              # Closing Odds holen
+    python3 backtesting.py clv-stats        # CLV-Statistiken anzeigen
 """
 
 import json
@@ -366,6 +368,9 @@ def _migrate_wettplan_columns(conn: sqlite3.Connection) -> None:
         ("operator_note",    "TEXT"),
         ("operator_updated_at", "TEXT"),
         ("reasoning",        "TEXT"),
+        ("closing_odds",     "REAL"),
+        ("closing_odds_at",  "TEXT"),
+        ("clv_pct",          "REAL"),
     ]
     for col_name, col_type in migrations:
         if col_name not in existing:
@@ -873,6 +878,12 @@ def update_result(
                 actual_outcome,
             )
 
+        # CLV berechnen falls Closing Odds vorhanden
+        clv_pct = row.get("clv_pct")
+        closing_odds = row.get("closing_odds")
+        if closing_odds and closing_odds > 0 and clv_pct is None:
+            clv_pct = round((row["best_odds"] / closing_odds - 1.0) * 100.0, 2)
+
         fetched_at = datetime.now(timezone.utc).isoformat()
 
         conn.execute(
@@ -885,11 +896,12 @@ def update_result(
                 bet_won           = ?,
                 pnl_units         = ?,
                 pnl_eur           = ?,
-                actual_pnl_eur    = ?
+                actual_pnl_eur    = ?,
+                clv_pct           = ?
             WHERE id = ?
             """,
             (fetched_at, home_score, away_score, actual_outcome,
-             bet_won, pnl_units, pnl_eur, actual_pnl_eur, prediction_id),
+             bet_won, pnl_units, pnl_eur, actual_pnl_eur, clv_pct, prediction_id),
         )
 
     return {
@@ -1035,6 +1047,231 @@ def _extract_scores(entry: dict) -> tuple[int | None, int | None]:
     return home_score, away_score
 
 
+def fetch_closing_odds(hours_before: int = 3, api_key: str | None = None) -> dict:
+    """
+    Holt Closing-Line-Odds fuer Spiele, die bald starten oder bereits laufen.
+
+    Aktualisiert closing_odds, closing_odds_at und clv_pct in der predictions-Tabelle.
+
+    Args:
+        hours_before: Stunden vor Spielstart, ab denen Closing Odds geholt werden
+        api_key: Odds API Key (wird aus Credentials geladen falls None)
+
+    Returns:
+        {"updated": int, "skipped": int, "api_calls": int}
+    """
+    from collections import defaultdict
+    from datasources.odds_api import get_odds, best_odds_from_match, best_ou_odds_from_match
+
+    if api_key is None:
+        api_key = _load_api_key()
+
+    if not api_key:
+        print("[CLV] Kein ODDS_API_KEY – uebersprungen")
+        return {"updated": 0, "skipped": 0, "api_calls": 0}
+
+    now = datetime.now(timezone.utc)
+    cutoff = (now + timedelta(hours=hours_before)).isoformat()
+
+    # Predictions: closing_odds noch nicht gesetzt, nicht resolved, Spielstart <= cutoff, selected
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, odds_api_match_id, sport_key, bet_type, outcome_side,
+                   ou_line, home_team, away_team, best_odds, commence_time
+            FROM predictions
+            WHERE closing_odds IS NULL
+              AND bet_won IS NULL
+              AND selected = 1
+              AND commence_time <= ?
+            ORDER BY sport_key, commence_time
+            """,
+            (cutoff,),
+        ).fetchall()
+
+    preds = [dict(r) for r in rows]
+    if not preds:
+        print("[CLV] Keine Predictions fuer Closing-Odds-Update gefunden.")
+        return {"updated": 0, "skipped": 0, "api_calls": 0}
+
+    print(f"[CLV] {len(preds)} Predictions fuer Closing-Odds-Update gefunden")
+
+    # Nach sport_key gruppieren
+    by_sport: dict[str, list[dict]] = defaultdict(list)
+    for p in preds:
+        by_sport[p["sport_key"]].append(p)
+
+    updated = 0
+    skipped = 0
+    api_calls = 0
+
+    for sport_key, sport_preds in by_sport.items():
+        print(f"[CLV] Hole Odds fuer {sport_key} ({len(sport_preds)} Bets) …")
+        try:
+            matches, remaining = get_odds(api_key, sport_key, markets="h2h,totals")
+            api_calls += 1
+        except Exception as e:
+            err_msg = str(e)
+            if api_key and api_key in err_msg:
+                err_msg = err_msg.replace(api_key, "***")
+            print(f"[CLV] API-Fehler fuer {sport_key}: {err_msg} – uebersprungen")
+            skipped += len(sport_preds)
+            continue
+
+        if not matches:
+            print(f"[CLV] Keine Matches fuer {sport_key} – uebersprungen")
+            skipped += len(sport_preds)
+            continue
+
+        # Index: match_id -> match-dict
+        matches_by_id = {m["id"]: m for m in matches}
+
+        # Fuzzy-Index: "home_team|away_team" -> match
+        matches_by_teams = {}
+        for m in matches:
+            key = f"{m['home_team']}|{m['away_team']}".lower()
+            matches_by_teams[key] = m
+
+        fetch_time = datetime.now(timezone.utc).isoformat()
+
+        with _connect() as conn:
+            for p in sport_preds:
+                # Match finden: primaer via odds_api_match_id, sonst fuzzy
+                match = None
+                if p.get("odds_api_match_id"):
+                    match = matches_by_id.get(p["odds_api_match_id"])
+
+                if match is None:
+                    # Fuzzy-Fallback ueber Teamnamen
+                    team_key = f"{p['home_team']}|{p['away_team']}".lower()
+                    match = matches_by_teams.get(team_key)
+
+                if match is None:
+                    # Fuzzy mit get_close_matches
+                    team_key = f"{p['home_team']}|{p['away_team']}".lower()
+                    candidates = list(matches_by_teams.keys())
+                    close = get_close_matches(team_key, candidates, n=1, cutoff=0.7)
+                    if close:
+                        match = matches_by_teams[close[0]]
+
+                if match is None:
+                    skipped += 1
+                    continue
+
+                # Closing Odds extrahieren
+                closing_odds = None
+                outcome_side = p["outcome_side"]
+                bet_type = p["bet_type"]
+
+                if bet_type == "ou" and p.get("ou_line") is not None:
+                    # Over/Under
+                    ou_lines = best_ou_odds_from_match(match)
+                    for ou in ou_lines:
+                        if abs(ou["line"] - p["ou_line"]) < 0.01:
+                            if outcome_side == "over":
+                                closing_odds = ou["over_odds"]
+                            elif outcome_side == "under":
+                                closing_odds = ou["under_odds"]
+                            break
+                else:
+                    # 1x2 / Tennis (home/draw/away)
+                    best = best_odds_from_match(match)
+                    closing_odds = best.get(outcome_side)
+
+                if closing_odds is None or closing_odds <= 1.0:
+                    skipped += 1
+                    continue
+
+                # CLV berechnen
+                best_odds = p["best_odds"]
+                clv_pct = (best_odds / closing_odds - 1.0) * 100.0 if closing_odds > 0 else None
+
+                conn.execute(
+                    """
+                    UPDATE predictions SET
+                        closing_odds    = ?,
+                        closing_odds_at = ?,
+                        clv_pct         = ?
+                    WHERE id = ?
+                    """,
+                    (round(closing_odds, 3), fetch_time,
+                     round(clv_pct, 2) if clv_pct is not None else None,
+                     p["id"]),
+                )
+                updated += 1
+
+                direction = "+" if (clv_pct and clv_pct > 0) else ""
+                print(
+                    f"[CLV]   {p['home_team']} – {p['away_team']}  "
+                    f"{p['outcome_side']}  Scan: {best_odds:.2f} → Closing: {closing_odds:.2f}  "
+                    f"CLV: {direction}{clv_pct:.1f}%"
+                )
+
+        if remaining is not None:
+            print(f"[CLV] API-Requests verbleibend: {remaining}")
+
+    print(f"\n[CLV] Ergebnis: {updated} aktualisiert, {skipped} uebersprungen, {api_calls} API-Calls")
+    return {"updated": updated, "skipped": skipped, "api_calls": api_calls}
+
+
+def get_clv_stats() -> dict:
+    """
+    Berechnet CLV-Statistiken fuer alle Predictions mit Closing Odds.
+
+    Returns:
+        dict mit overall, won, lost, distribution, by_sport
+    """
+    with _connect() as conn:
+        # Gesamt
+        overall = conn.execute("""
+            SELECT
+                COUNT(*)                     AS total,
+                ROUND(AVG(clv_pct), 2)       AS avg_clv,
+                ROUND(MIN(clv_pct), 2)       AS min_clv,
+                ROUND(MAX(clv_pct), 2)       AS max_clv,
+                SUM(CASE WHEN clv_pct > 0 THEN 1 ELSE 0 END) AS positive,
+                SUM(CASE WHEN clv_pct <= 0 THEN 1 ELSE 0 END) AS negative
+            FROM predictions
+            WHERE clv_pct IS NOT NULL AND selected = 1
+        """).fetchone()
+
+        # Nach Gewonnen/Verloren
+        won = conn.execute("""
+            SELECT COUNT(*) AS total, ROUND(AVG(clv_pct), 2) AS avg_clv
+            FROM predictions
+            WHERE clv_pct IS NOT NULL AND selected = 1 AND bet_won = 1
+        """).fetchone()
+
+        lost = conn.execute("""
+            SELECT COUNT(*) AS total, ROUND(AVG(clv_pct), 2) AS avg_clv
+            FROM predictions
+            WHERE clv_pct IS NOT NULL AND selected = 1 AND bet_won = 0
+        """).fetchone()
+
+        # Nach Liga
+        by_sport = conn.execute("""
+            SELECT
+                sport_key,
+                COUNT(*)                     AS total,
+                ROUND(AVG(clv_pct), 2)       AS avg_clv,
+                SUM(CASE WHEN clv_pct > 0 THEN 1 ELSE 0 END) AS positive,
+                SUM(CASE WHEN clv_pct <= 0 THEN 1 ELSE 0 END) AS negative,
+                ROUND(AVG(CASE WHEN bet_won = 1 THEN clv_pct END), 2) AS avg_clv_won,
+                ROUND(AVG(CASE WHEN bet_won = 0 THEN clv_pct END), 2) AS avg_clv_lost
+            FROM predictions
+            WHERE clv_pct IS NOT NULL AND selected = 1
+            GROUP BY sport_key
+            ORDER BY avg_clv DESC
+        """).fetchall()
+
+    return {
+        "overall": dict(overall) if overall else {},
+        "won": dict(won) if won else {},
+        "lost": dict(lost) if lost else {},
+        "by_sport": [dict(r) for r in by_sport],
+    }
+
+
 def resolve_results(api_key: str | None = None) -> dict:
     """
     Ruft The Odds API /scores auf und trägt Ergebnisse für offene Vorhersagen ein.
@@ -1056,6 +1293,14 @@ def resolve_results(api_key: str | None = None) -> dict:
     if not api_key:
         print("[Backtesting] resolve_results: kein ODDS_API_KEY – übersprungen")
         return {"resolved": 0, "still_open": 0, "stale": 0}
+
+    # Closing Odds fuer bald startende/laufende Spiele holen
+    try:
+        clv_result = fetch_closing_odds(hours_before=3, api_key=api_key)
+        if clv_result["updated"] > 0:
+            print(f"[Backtesting] Closing Odds: {clv_result['updated']} aktualisiert")
+    except Exception as e:
+        print(f"[Backtesting] Closing-Odds-Fehler (nicht kritisch): {e}")
 
     open_preds = get_open_predictions()
     if not open_preds:
@@ -1689,6 +1934,59 @@ if __name__ == "__main__":
         result = resolve_results()
         print(f"Resolved: {result['resolved']} | Still open: {result['still_open']} | Stale: {result.get('stale', 0)}")
 
+    elif cmd == "clv":
+        result = fetch_closing_odds()
+        print(f"\nClosing Odds: {result['updated']} aktualisiert | {result['skipped']} uebersprungen | {result['api_calls']} API-Calls")
+
+    elif cmd == "clv-stats":
+        stats = get_clv_stats()
+        o = stats["overall"]
+        if not o or not o.get("total"):
+            print("Noch keine CLV-Daten vorhanden.")
+            print("Tipp: Closing Odds werden automatisch vor dem Resolve geholt,")
+            print("      oder manuell via: python3 backtesting.py clv")
+            sys.exit(0)
+
+        W = 60
+        print(f"\n{'=' * W}")
+        print(f"  CLOSING LINE VALUE (CLV) STATISTIKEN")
+        print(f"{'=' * W}")
+
+        print(f"  Bets mit CLV-Daten : {o['total']}")
+        print(f"  Durchschnitt CLV   : {o['avg_clv']:+.2f}%")
+        print(f"  Min / Max          : {o['min_clv']:+.2f}% / {o['max_clv']:+.2f}%")
+        print(f"  Positiv / Negativ  : {o['positive']} / {o['negative']}")
+        if o["total"] > 0:
+            pct_positive = 100 * o["positive"] / o["total"]
+            print(f"  Anteil positiv     : {pct_positive:.0f}%")
+
+        w = stats["won"]
+        l = stats["lost"]
+        print(f"\n{'-' * W}")
+        print(f"  CLV NACH ERGEBNIS")
+        print(f"{'-' * W}")
+        if w.get("total"):
+            print(f"  Gewonnene Bets     : {w['total']:3d} Bets  Ø CLV {w['avg_clv']:+.2f}%")
+        if l.get("total"):
+            print(f"  Verlorene Bets     : {l['total']:3d} Bets  Ø CLV {l['avg_clv']:+.2f}%")
+
+        by_sport = stats["by_sport"]
+        if by_sport:
+            print(f"\n{'-' * W}")
+            print(f"  CLV NACH LIGA")
+            print(f"{'-' * W}")
+            _print_table(
+                ["Liga", "Bets", "Ø CLV", "Pos", "Neg", "Ø Won", "Ø Lost"],
+                [[r['sport_key'], str(r['total']),
+                  f"{r['avg_clv']:+.2f}%",
+                  str(r['positive']), str(r['negative']),
+                  f"{r['avg_clv_won']:+.2f}%" if r.get('avg_clv_won') is not None else "–",
+                  f"{r['avg_clv_lost']:+.2f}%" if r.get('avg_clv_lost') is not None else "–"]
+                 for r in by_sport],
+            )
+
+        print(f"\n{'=' * W}")
+
     elif cmd == "cleanup":
         # Retention Policy: alte Odds-Snapshots für resolved Predictions löschen
         dry_run = "--dry-run" in sys.argv
@@ -1704,7 +2002,7 @@ if __name__ == "__main__":
 
     else:
         print(f"Unbekannter Befehl: {cmd}")
-        print("Verwendung: python3 backtesting.py [summary|open|resolve|stale|manual|void|cleanup]")
+        print("Verwendung: python3 backtesting.py [summary|open|resolve|stale|manual|void|clv|clv-stats|cleanup]")
         print()
         print("  summary                        — Gesamtauswertung")
         print("  open                           — Offene Predictions anzeigen")
@@ -1712,5 +2010,7 @@ if __name__ == "__main__":
         print("  stale                          — Predictions >7 Tage ohne Ergebnis")
         print("  manual <id> <heim> <gast>      — Manuelles Ergebnis eintragen")
         print("  void <id>                      — Spiel als ausgefallen markieren")
+        print("  clv                            — Closing Odds fuer laufende Spiele holen")
+        print("  clv-stats                      — CLV-Statistiken anzeigen")
         print("  cleanup [--dry-run] [--days=N]  — Alte Odds-Snapshots löschen (Standard: 90 Tage)")
         sys.exit(1)
