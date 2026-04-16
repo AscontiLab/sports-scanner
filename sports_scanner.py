@@ -1252,10 +1252,19 @@ def main() -> int:
     print("=" * 60)
 
     creds = load_credentials()
-    api_key = creds.get("ODDS_API_KEY", "")
+    api_keys = [v for k, v in sorted(creds.items())
+                if k.startswith("ODDS_API_KEY") and v]
+    if not api_keys:
+        api_keys = [creds.get("ODDS_API_KEY", "")]
+    api_key = api_keys[0] if api_keys else ""
     if not args.dry_run and not api_key:
         print("ERROR: ODDS_API_KEY fehlt in ~/.stock_scanner_credentials")
         return 1
+    # Fallback-Keys fuer Rotation bei Quota-Erschoepfung
+    if len(api_keys) > 1:
+        print(f"  API-Keys geladen: {len(api_keys)} (Rotation aktiv)")
+        from datasources.odds_api import set_api_keys
+        set_api_keys(api_keys)
 
     date_str = datetime.now().strftime("%Y-%m-%d")
     out_dir  = OUTPUT_DIR / date_str

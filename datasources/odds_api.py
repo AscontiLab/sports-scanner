@@ -42,36 +42,83 @@ except ImportError:
         raise last_error
 
 
+# ── Key-Rotation ────────────────────────────────────────────
+_api_keys: list[str] = []
+_current_key_idx: int = 0
+
+
+def set_api_keys(keys: list[str]) -> None:
+    """Registriert mehrere API-Keys fuer automatische Rotation."""
+    global _api_keys, _current_key_idx
+    _api_keys = list(keys)
+    _current_key_idx = 0
+
+
+def _resolve_key(api_key: str) -> str:
+    """Gibt den aktuellen Rotations-Key zurueck (oder den uebergebenen)."""
+    if _api_keys:
+        return _api_keys[_current_key_idx]
+    return api_key
+
+
+def _rotate_key(api_key: str) -> str | None:
+    """Wechselt zum naechsten Key. Gibt neuen Key oder None zurueck."""
+    global _current_key_idx
+    if not _api_keys or len(_api_keys) <= 1:
+        return None
+    _current_key_idx = (_current_key_idx + 1) % len(_api_keys)
+    new_key = _api_keys[_current_key_idx]
+    if new_key == api_key:
+        return None  # Alle Keys durchprobiert
+    print(f"    🔄 Key-Rotation: wechsle zu Key #{_current_key_idx + 1}")
+    return new_key
+# ────────────────────────────────────────────────────────────
+
+
 def get_active_sports(api_key: str) -> list:
+    key = _resolve_key(api_key)
     r = _request_with_retry(f"{ODDS_API_BASE}/sports",
-                            params={"apiKey": api_key}, timeout=15)
+                            params={"apiKey": key}, timeout=15)
     return r.json()
 
 
 def get_odds(api_key: str, sport_key: str, markets: str = "h2h,totals") -> tuple[list, int | None]:
-    """Holt Odds von der API. Gibt (matches, remaining_quota) zurueck."""
-    params = {
-        "apiKey":     api_key,
-        "regions":    "eu",
-        "markets":    markets,
-        "oddsFormat": "decimal",
-        "dateFormat": "iso",
-    }
+    """Holt Odds von der API. Gibt (matches, remaining_quota) zurueck.
+    Bei 401 (Quota leer) wird automatisch zum naechsten Key rotiert."""
+    key = _resolve_key(api_key)
+
+    def _fetch(k: str) -> tuple[list, int | None]:
+        params = {
+            "apiKey":     k,
+            "regions":    "eu",
+            "markets":    markets,
+            "oddsFormat": "decimal",
+            "dateFormat": "iso",
+        }
+        try:
+            r = _request_with_retry(f"{ODDS_API_BASE}/sports/{sport_key}/odds",
+                                    params=params, timeout=20)
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                return [], None
+            raise
+        remaining = r.headers.get("x-requests-remaining", "?")
+        try:
+            remaining_int = int(remaining)
+        except Exception:
+            remaining_int = None
+        data = r.json()
+        print(f"    → {len(data)} Matches | API-Requests verbleibend: {remaining}")
+        return data, remaining_int
+
     try:
-        r = _request_with_retry(f"{ODDS_API_BASE}/sports/{sport_key}/odds",
-                                params=params, timeout=20)
+        return _fetch(key)
     except requests.exceptions.HTTPError as e:
-        if e.response is not None and e.response.status_code == 404:
-            return [], None
+        if e.response is not None and e.response.status_code == 401:
+            next_key = _rotate_key(key)
+            if next_key:
+                return _fetch(next_key)
         raise
-    remaining = r.headers.get("x-requests-remaining", "?")
-    try:
-        remaining_int = int(remaining)
-    except Exception:
-        remaining_int = None
-    data = r.json()
-    print(f"    → {len(data)} Matches | API-Requests verbleibend: {remaining}")
-    return data, remaining_int
 
 
 def best_odds_from_match(match: dict) -> dict:

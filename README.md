@@ -97,12 +97,16 @@ Credentials werden in `~/.stock_scanner_credentials` erwartet:
 
 ```bash
 ODDS_API_KEY=...
+ODDS_API_KEY_2=...          # Optional: weitere Keys fuer Rotation
+ODDS_API_KEY_3=...          # Beliebig viele Keys moeglich
 GMAIL_USER=...
 GMAIL_APP_PASSWORD=...
 GMAIL_RECIPIENT=...
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_CHAT_ID=...
 ```
+
+Mehrere API-Keys werden automatisch rotiert: Wenn ein Key seine monatliche Quota (500 Requests) aufbraucht (401), wechselt der Scanner sofort zum naechsten Key. Alle Keys mit Prefix `ODDS_API_KEY` werden alphabetisch sortiert geladen.
 
 ## Nutzung
 
@@ -255,6 +259,13 @@ Profitabel bleiben: Under allgemein (+16.4% ROI), Over La Liga/3. Liga/Ligue 1, 
 - Telegram: CLV pro Bet + woechentliche CLV-Summary
 - In Cron-Runner integriert (vor Resolve)
 
+## API-Key-Rotation (2026-04-16)
+
+- Mehrere `ODDS_API_KEY` / `ODDS_API_KEY_2` / `ODDS_API_KEY_3` etc. in Credentials moeglich
+- Bei 401 (Quota leer) wird automatisch zum naechsten Key rotiert — ohne Retries
+- `set_api_keys()` in `datasources/odds_api.py` registriert alle Keys beim Start
+- 401/403 in `scanner_common.retry` werden sofort geworfen (kein sinnloses Retry)
+
 ## Cron
 
 ```cron
@@ -265,4 +276,4 @@ Cron laeuft taeglich um 06:00 UTC (08:00 Berlin).
 
 ## Status
 
-Produktionsnaher Sports-Scanner mit 7 Ligen + UEFA + Tennis, Bet Selection, Bankroll-Management, Auto-Resolve, CLV-Tracking, Kicktipp und Hub-API.
+Produktionsnaher Sports-Scanner mit 7 Ligen + UEFA + Tennis, Bet Selection, Bankroll-Management, Auto-Resolve, CLV-Tracking, API-Key-Rotation, Kicktipp und Hub-API.
