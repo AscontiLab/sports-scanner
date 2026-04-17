@@ -16,6 +16,7 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
 PORT = 8099
+MAX_API_BODY_BYTES = 65_536
 # Serve both sports-scanner and stock-scanner output
 BASE_DIRS = {
     "/sports/": Path("/home/claude-agent/sports-scanner/output"),
@@ -31,7 +32,7 @@ _SPORTS_API_TOKEN = _creds.get("SPORTS_API_TOKEN") or None
 if _SPORTS_API_TOKEN:
     print(f"[Auth] SPORTS_API_TOKEN konfiguriert — API-Endpoints geschützt")
 else:
-    print("[Auth] WARNUNG: Kein SPORTS_API_TOKEN in ~/.stock_scanner_credentials — API-Endpoints ungeschützt")
+    print("[Auth] WARNUNG: Kein SPORTS_API_TOKEN in ~/.stock_scanner_credentials — /api/* Requests liefern 503")
 
 
 def _sports_dirs():
@@ -200,6 +201,18 @@ class OutputHandler(SimpleHTTPRequestHandler):
         self._send_cors_headers()
         self.end_headers()
         self.wfile.write(json.dumps(data, ensure_ascii=False).encode())
+
+    def _read_json_body(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length > MAX_API_BODY_BYTES:
+            self._json_response({"ok": False, "error": "Payload too large"}, 413)
+            return None
+        body = self.rfile.read(content_length) if content_length > 0 else b"{}"
+        try:
+            return json.loads(body.decode("utf-8"))
+        except Exception:
+            self._json_response({"ok": False, "error": "Ungueltiges JSON"}, 400)
+            return None
 
     def do_OPTIONS(self):
         if self.path.startswith("/api/"):
@@ -486,6 +499,8 @@ class OutputHandler(SimpleHTTPRequestHandler):
         """Erlaubt operative Aktionen für Sports-Bets (nur localhost/Docker)."""
         if not self._check_put_allowed():
             return
+        if self.path.startswith("/api/") and not self._check_api_auth():
+            return
 
         if self.path == "/api/sports-bets/place":
             try:
@@ -495,12 +510,8 @@ class OutputHandler(SimpleHTTPRequestHandler):
                 self._json_response({"ok": False, "error": "Backtesting-Modul nicht ladbar"}, 500)
                 return
 
-            content_length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(content_length) if content_length > 0 else b"{}"
-            try:
-                payload = json.loads(body.decode("utf-8"))
-            except Exception:
-                self._json_response({"ok": False, "error": "Ungueltiges JSON"}, 400)
+            payload = self._read_json_body()
+            if payload is None:
                 return
 
             prediction_id = payload.get("prediction_id")
@@ -536,12 +547,8 @@ class OutputHandler(SimpleHTTPRequestHandler):
                 self._json_response({"ok": False, "error": "Backtesting-Modul nicht ladbar"}, 500)
                 return
 
-            content_length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(content_length) if content_length > 0 else b"{}"
-            try:
-                payload = json.loads(body.decode("utf-8"))
-            except Exception:
-                self._json_response({"ok": False, "error": "Ungueltiges JSON"}, 400)
+            payload = self._read_json_body()
+            if payload is None:
                 return
 
             prediction_id = payload.get("prediction_id")
