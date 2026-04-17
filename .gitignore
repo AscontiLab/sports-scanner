@@ -2,6 +2,10 @@ output/
 logs/
 __pycache__/
 *.pyc
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
 *.log
 *.db
 .scanner.lock

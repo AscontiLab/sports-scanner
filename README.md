@@ -104,6 +104,7 @@ GMAIL_APP_PASSWORD=...
 GMAIL_RECIPIENT=...
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_CHAT_ID=...
+SPORTS_API_TOKEN=...        # Pflicht fuer lokale /api/* Endpoints auf Port 8099
 ```
 
 Mehrere API-Keys werden automatisch rotiert: Wenn ein Key seine monatliche Quota (500 Requests) aufbraucht (401), wechselt der Scanner sofort zum naechsten Key. Alle Keys mit Prefix `ODDS_API_KEY` werden alphabetisch sortiert geladen.
@@ -160,6 +161,9 @@ Weitere Artefakte:
 - `GET /api/kicktipp-for-date?date=YYYY-MM-DD` — Tipps fuer Datum
 - `GET /api/kicktipp-stats` — Aggregierte Stats (30 Tage)
 
+Alle `/api/*` Endpoints erwarten `Authorization: Bearer $SPORTS_API_TOKEN`. Fehlt der Token in `~/.stock_scanner_credentials`, beantwortet der Server diese Requests mit `503` statt ungeschuetzt weiterzulaufen.
+Laufzeitdateien wie `.env`, `output/`, `logs/`, `cache/` und lokale `*.db`-Dateien bleiben bewusst unversioniert.
+
 ## Webhook-Proxy fuer den Browser
 
 Der Sports-Report wird unter `https://agents.umzwei.de/webhook/sports-report` ausgeliefert. Fuer Browser-Aktionen wie `In Bankroll` darf das Frontend daher nicht direkt auf `http://...:8099` zugreifen.
@@ -173,6 +177,8 @@ Diese sollen in n8n serverseitig an den lokalen Sports-Scanner-Server weiterleit
 
 - `http://172.28.0.1:8099/api/sports-bets`
 - `http://172.28.0.1:8099/api/sports-bets/place`
+
+Auch die mutierenden POST-Endpoints erfordern denselben Bearer-Token zusaetzlich zur bestehenden IP-Einschraenkung.
 
 Importierbare Workflow-Definitionen liegen unter:
 
